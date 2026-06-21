@@ -1,9 +1,8 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AppWindow,
   Box,
-  Boxes,
   ChevronRight,
   CircleAlert,
   Code2,
@@ -19,13 +18,20 @@ import {
   Settings,
   Wrench,
 } from "lucide-react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { installedApps as defaultApps, pinnedProjects as defaultPinned, recentProjects as defaultRecent, type Project } from "./data";
 import { APP_CATEGORY_LABELS, desktopApi, formatVersion, isDemoMode, isNativeRuntime, loadDashboard, type HealthIssue, type UpdateInfo } from "./bridge";
-import { QueryClientProvider } from "@tanstack/react-query";
 import { createQueryClient, useApps, useInvalidate, useProjects, useTools } from "./lib/queries";
 import { type ThemePreference, useTheme } from "./theme";
 import voidlineImage from "./assets/voidline-reactor.png";
-import "./styles.css";
 
 const navigation = [
   ["Home", Home],
@@ -36,6 +42,8 @@ const navigation = [
   ["Settings", Settings],
 ] as const;
 
+type Screen = (typeof navigation)[number][0];
+
 const sampleContinueProject: Project = {
   name: "Voidline",
   path: "D:/Dev/Projects/Voidline",
@@ -45,30 +53,10 @@ const sampleContinueProject: Project = {
   lastOpened: "Today, 10:42 AM",
 };
 
-function ProjectTable({ projects, onOpen }: { projects: Project[]; onOpen: (project: Project) => void }) {
-  return (
-    <div className="project-table" role="table" aria-label="Projects">
-      <div className="project-row project-head" role="row">
-        <span>Project</span><span>Last opened</span><span>Engine / version</span><span>Branch</span><span>Actions</span>
-      </div>
-      {projects.map((project) => (
-        <div className="project-row" role="row" key={project.name}>
-          <span className="project-identity"><span className="project-icon"><Boxes size={18} /></span><span><strong>{project.name}</strong><small>{project.path}</small></span></span>
-          <span>{project.lastOpened}</span>
-          <span className="engine"><Box size={15} /> {project.engine} {project.version}</span>
-          <span className="branch"><GitBranch size={14} /> {project.branch}</span>
-          <span className="row-actions"><button className="outline-button" onClick={() => onOpen(project)}><Folder size={14} /> Open Project</button><button className="icon-button" onClick={() => onOpen(project)} aria-label={`More actions for ${project.name}`}><MoreHorizontal size={17} /></button></span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptyState({ text }: { text: string }) {
-  return <div className="empty-state"><CircleAlert size={20} /><span>{text}</span></div>;
-}
-
 const CATEGORY_ORDER = ["game-engine", "dcc", "art", "code", "version-control", "utility"];
+
+const themeSelectClass =
+  "h-8 rounded-md border border-border bg-secondary px-2 text-sm text-secondary-foreground focus:outline-none focus:ring-2 focus:ring-ring";
 
 function AppIcon({ executable, size = 22 }: { executable?: string; size?: number }) {
   const [src, setSrc] = useState<string | null>(null);
@@ -81,20 +69,62 @@ function AppIcon({ executable, size = 22 }: { executable?: string; size?: number
     }
     return () => { active = false; };
   }, [executable]);
-  return src ? <img className="app-icon-img" src={src} alt="" width={size} height={size} /> : <AppWindow size={size} />;
+  return src
+    ? <img className="rounded object-contain" width={size} height={size} src={src} alt="" />
+    : <AppWindow size={size} className="text-muted-foreground" />;
+}
+
+function ProjectTable({ projects, onOpen }: { projects: Project[]; onOpen: (project: Project) => void }) {
+  return (
+    <div className="overflow-hidden rounded-xl border border-border" role="table" aria-label="Projects">
+      <div className="grid grid-cols-[2fr_1fr_1.2fr_1fr_auto] gap-3 border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground" role="row">
+        <span>Project</span><span>Last opened</span><span>Engine / version</span><span>Branch</span><span>Actions</span>
+      </div>
+      {projects.length === 0 ? <EmptyState text="No projects in this view yet." /> : projects.map((project) => (
+        <div className="grid grid-cols-[2fr_1fr_1.2fr_1fr_auto] items-center gap-3 border-b border-border px-4 py-3 text-sm last:border-0 hover:bg-muted/30" role="row" key={project.name}>
+          <span className="flex items-center gap-3">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-primary"><Box size={18} /></span>
+            <span className="flex flex-col"><strong className="font-medium">{project.name}</strong><small className="text-xs text-muted-foreground">{project.path}</small></span>
+          </span>
+          <span className="text-muted-foreground">{project.lastOpened}</span>
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Box size={14} /> {project.engine} {project.version}</span>
+          <span className="flex items-center gap-1.5 text-muted-foreground"><GitBranch size={13} /> {project.branch}</span>
+          <span className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" onClick={() => onOpen(project)}><Folder size={14} /> Open Project</Button>
+            <Button variant="ghost" size="icon" aria-label={`More actions for ${project.name}`} onClick={() => onOpen(project)}><MoreHorizontal size={17} /></Button>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground"><CircleAlert size={18} /><span>{text}</span></div>;
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{children}</div>;
+}
+
+function Panel({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  return (
+    <Card><CardContent className="space-y-3 p-5">
+      <div><h2 className="text-base font-semibold">{title}</h2>{description ? <p className="mt-0.5 text-sm text-muted-foreground">{description}</p> : null}</div>
+      {children}
+    </CardContent></Card>
+  );
 }
 
 function AppShell() {
-  const [activeScreen, setActiveScreen] = useState<(typeof navigation)[number][0]>("Home");
+  const [activeScreen, setActiveScreen] = useState<Screen>("Home");
   const [projectView, setProjectView] = useState<"pinned" | "recent">("pinned");
   const [query, setQuery] = useState("");
   const [continueProject, setContinueProject] = useState<Project | null>(isDemoMode() ? sampleContinueProject : null);
   const [pinnedProjects, setPinnedProjects] = useState(isDemoMode() ? defaultPinned : []);
   const [recentProjects, setRecentProjects] = useState(isDemoMode() ? defaultRecent : []);
   const [installedApps, setInstalledApps] = useState<Array<{ id: string; name: string; versions: string[] }>>(
-    isDemoMode()
-      ? defaultApps.map((app) => ({ id: app.name.toLowerCase().replaceAll(" ", "-"), ...app }))
-      : [],
+    isDemoMode() ? defaultApps.map((app) => ({ id: app.name.toLowerCase().replaceAll(" ", "-"), ...app })) : [],
   );
   const [health, setHealth] = useState<HealthIssue[]>([]);
   const projectsQuery = useProjects(activeScreen === "Projects");
@@ -113,7 +143,6 @@ function AppShell() {
   const [overrideApp, setOverrideApp] = useState("unity");
   const [overrideVersion, setOverrideVersion] = useState("");
   const [overrideExecutable, setOverrideExecutable] = useState("");
-  const [status, setStatus] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [scanning, setScanning] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -151,9 +180,8 @@ function AppShell() {
   }, []);
 
   async function run(label: string, action: () => Promise<unknown>) {
-    setStatus(`${label}...`);
-    try { await action(); setStatus(`${label} complete.`); }
-    catch (error) { setStatus(error instanceof Error ? error.message : String(error)); }
+    try { await action(); toast.success(`${label} complete.`); }
+    catch (error) { toast.error(error instanceof Error ? error.message : String(error)); }
   }
 
   async function runScan() {
@@ -169,9 +197,8 @@ function AppShell() {
     }
   }
 
-  function openScreen(screen: (typeof navigation)[number][0]) {
+  function openScreen(screen: Screen) {
     setActiveScreen(screen);
-    setStatus("");
   }
 
   async function submitImport(event: FormEvent) {
@@ -181,94 +208,197 @@ function AppShell() {
   }
 
   const runtimeLabel = isNativeRuntime() ? "Native desktop" : isDemoMode() ? "Browser demo" : "Browser preview";
+
   const managementContent = (
-    <section className="management-screen">
-      <div className="page-heading"><div><span className="section-label">Workspace management</span><h1>{activeScreen}</h1></div><span className="runtime-badge">{runtimeLabel}</span></div>
-      {activeScreen === "Projects" ? <>
-        <form className="action-panel" onSubmit={submitImport}><h2>Import a local project</h2><p>Creates a `.vantadeck/project.toml` file and registers the project in local storage.</p><div className="form-row"><input aria-label="Project path" required placeholder="D:/Projects/MyGame" value={rootInput} onChange={(e) => setRootInput(e.target.value)} /><input aria-label="Project name" placeholder="Optional display name" value={nameInput} onChange={(e) => setNameInput(e.target.value)} /><button className="primary-button">Import project</button></div></form>
-        <div className="action-panel"><h2>Launch a project profile</h2><p>Profiles come from the portable project file; executable selection remains machine-local.</p><div className="form-row"><input aria-label="Launch project path" placeholder="Project root" value={rootInput} onChange={(e) => setRootInput(e.target.value)} /><input aria-label="Launch profile ID" placeholder="editor" value={profileInput} onChange={(e) => setProfileInput(e.target.value)} /><button className="primary-button" onClick={() => void run("Launching profile", () => desktopApi.launchProjectProfile(rootInput, profileInput))}>Launch profile</button></div></div>
-        <div className="action-panel"><h2>Git workflow</h2><p>Status is read-only. Sync, commit, push, and branch switching always ask for confirmation.</p><div className="form-row"><input aria-label="Git branch" placeholder="Branch" value={branchInput} onChange={(e) => setBranchInput(e.target.value)} /><input aria-label="Git commit message" placeholder="Commit message" value={commitInput} onChange={(e) => setCommitInput(e.target.value)} /><button className="outline-button" onClick={() => { if (window.confirm(`Switch ${rootInput} to ${branchInput}?`)) void run("Switching branch", () => desktopApi.gitSwitch(rootInput, branchInput, true)); }}>Switch</button><button className="outline-button" onClick={() => { if (window.confirm(`Pull changes into ${rootInput}?`)) void run("Syncing repository", () => desktopApi.gitSync(rootInput, true)); }}>Sync</button><button className="outline-button" onClick={() => { if (window.confirm(`Commit all changes in ${rootInput}?`)) void run("Committing changes", () => desktopApi.gitCommit(rootInput, commitInput, true)); }}>Commit</button><button className="outline-button" onClick={() => { if (window.confirm(`Push ${rootInput} to its configured remote?`)) void run("Pushing repository", () => desktopApi.gitPush(rootInput, true)); }}>Push</button></div></div>
-        <div className="card-grid">{registeredProjects.length ? registeredProjects.map((project) => <article className="management-card" key={project.path}><Folder /><div><h3>{project.name}</h3><p>{project.path}</p></div><span className="card-actions"><button className="outline-button" onClick={() => void run(project.pinned ? "Unpinning project" : "Pinning project", async () => { await desktopApi.pinProject(project.path, !project.pinned); await invalidate.projects(); })}>{project.pinned ? "Unpin" : "Pin"}</button><button className="outline-button" onClick={() => void run("Reading Git status", async () => { const result = await desktopApi.gitStatus(project.path); setStatus(`Branch ${result.branch ?? "detached"}; ${result.changedFiles.length} changed files.`); })}>Git status</button></span></article>) : <EmptyState text="No durable projects registered yet." />}</div>
-      </> : null}
-      {activeScreen === "Applications" ? <>
-        <div className="action-panel"><h2>Detect installed applications</h2><p>Leave roots blank to auto-scan standard install folders on every drive, or provide semicolon-separated roots. Detection uses bundled, auditable manifests.</p><div className="form-row"><input aria-label="Scan roots" placeholder="Blank = all drives, or e.g. D:/Tools; E:/Apps" value={scanRoots} disabled={scanning} onChange={(e) => setScanRoots(e.target.value)} /><button className="primary-button" disabled={scanning} aria-busy={scanning} onClick={() => void runScan()}>{scanning ? <><RefreshCw size={15} className="spin" /> Scanning…</> : "Scan now"}</button></div>{scanning ? <div className="scan-progress"><RefreshCw size={14} className="spin" /><span>Scanning installed applications across your drives — this can take a moment.</span></div> : null}</div>
+    <section className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div><SectionLabel>Workspace management</SectionLabel><h1 className="text-2xl font-semibold">{activeScreen}</h1></div>
+        <Badge variant="secondary">{runtimeLabel}</Badge>
+      </div>
+
+      {activeScreen === "Projects" ? <div className="space-y-4">
+        <form onSubmit={submitImport}><Panel title="Import a local project" description="Creates a .vantadeck/project.toml file and registers the project in local storage.">
+          <div className="flex flex-wrap gap-2">
+            <Input aria-label="Project path" required placeholder="D:/Projects/MyGame" value={rootInput} onChange={(e) => setRootInput(e.target.value)} className="flex-1 min-w-48" />
+            <Input aria-label="Project name" placeholder="Optional display name" value={nameInput} onChange={(e) => setNameInput(e.target.value)} className="flex-1 min-w-48" />
+            <Button type="submit">Import project</Button>
+          </div>
+        </Panel></form>
+        <Panel title="Launch a project profile" description="Profiles come from the portable project file; executable selection remains machine-local.">
+          <div className="flex flex-wrap gap-2">
+            <Input aria-label="Launch project path" placeholder="Project root" value={rootInput} onChange={(e) => setRootInput(e.target.value)} className="flex-1 min-w-48" />
+            <Input aria-label="Launch profile ID" placeholder="editor" value={profileInput} onChange={(e) => setProfileInput(e.target.value)} className="w-40" />
+            <Button onClick={() => void run("Launching profile", () => desktopApi.launchProjectProfile(rootInput, profileInput))}>Launch profile</Button>
+          </div>
+        </Panel>
+        <Panel title="Git workflow" description="Status is read-only. Sync, commit, push, and branch switching always ask for confirmation.">
+          <div className="flex flex-wrap gap-2">
+            <Input aria-label="Git branch" placeholder="Branch" value={branchInput} onChange={(e) => setBranchInput(e.target.value)} className="w-40" />
+            <Input aria-label="Git commit message" placeholder="Commit message" value={commitInput} onChange={(e) => setCommitInput(e.target.value)} className="flex-1 min-w-48" />
+            <Button variant="outline" onClick={() => { if (window.confirm(`Switch ${rootInput} to ${branchInput}?`)) void run("Switching branch", () => desktopApi.gitSwitch(rootInput, branchInput, true)); }}>Switch</Button>
+            <Button variant="outline" onClick={() => { if (window.confirm(`Pull changes into ${rootInput}?`)) void run("Syncing repository", () => desktopApi.gitSync(rootInput, true)); }}>Sync</Button>
+            <Button variant="outline" onClick={() => { if (window.confirm(`Commit all changes in ${rootInput}?`)) void run("Committing changes", () => desktopApi.gitCommit(rootInput, commitInput, true)); }}>Commit</Button>
+            <Button variant="outline" onClick={() => { if (window.confirm(`Push ${rootInput} to its configured remote?`)) void run("Pushing repository", () => desktopApi.gitPush(rootInput, true)); }}>Push</Button>
+          </div>
+        </Panel>
+        <div className="grid gap-3 sm:grid-cols-2">{registeredProjects.length ? registeredProjects.map((project) => (
+          <Card key={project.path}><CardContent className="flex items-start gap-3 p-4">
+            <Folder className="mt-0.5 text-primary" />
+            <div className="min-w-0 flex-1"><h3 className="truncate font-medium">{project.name}</h3><p className="truncate text-sm text-muted-foreground">{project.path}</p>
+              <div className="mt-3 flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => void run(project.pinned ? "Unpinning project" : "Pinning project", async () => { await desktopApi.pinProject(project.path, !project.pinned); await invalidate.projects(); })}>{project.pinned ? "Unpin" : "Pin"}</Button>
+                <Button variant="outline" size="sm" onClick={() => void run("Reading Git status", async () => { const result = await desktopApi.gitStatus(project.path); toast.message(`Branch ${result.branch ?? "detached"}`, { description: `${result.changedFiles.length} changed files.` }); })}>Git status</Button>
+              </div>
+            </div>
+          </CardContent></Card>
+        )) : <EmptyState text="No durable projects registered yet." />}</div>
+      </div> : null}
+
+      {activeScreen === "Applications" ? <div className="space-y-5">
+        <Panel title="Detect installed applications" description="Leave roots blank to auto-scan standard install folders on every drive, or provide semicolon-separated roots. Detection uses bundled, auditable manifests.">
+          <div className="flex flex-wrap gap-2">
+            <Input aria-label="Scan roots" placeholder="Blank = all drives, or e.g. D:/Tools; E:/Apps" value={scanRoots} disabled={scanning} onChange={(e) => setScanRoots(e.target.value)} className="flex-1 min-w-56" />
+            <Button disabled={scanning} aria-busy={scanning} onClick={() => void runScan()}>{scanning ? <><RefreshCw size={15} className="animate-spin" /> Scanning…</> : "Scan now"}</Button>
+          </div>
+          {scanning ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><RefreshCw size={14} className="animate-spin" /> Scanning installed applications across your drives — this can take a moment.</p> : null}
+        </Panel>
         {CATEGORY_ORDER.filter((category) => managedApps.some((app) => app.category === category)).map((category) => (
-          <section className="app-category" key={category}>
-            <h2 className="app-category-title">{APP_CATEGORY_LABELS[category] ?? category}</h2>
-            <div className="card-grid">{managedApps.filter((app) => app.category === category).map((app) => {
+          <section key={category} className="space-y-2">
+            <SectionLabel>{APP_CATEGORY_LABELS[category] ?? category}</SectionLabel>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{managedApps.filter((app) => app.category === category).map((app) => {
               const iconInstall = app.installations.find((item) => item.runnable) ?? app.installations[0];
               const launchTarget = app.installations.find((item) => item.runnable);
               const hasIncompatible = app.installations.some((item) => !item.runnable);
               return (
-                <article className="management-card" key={app.id}>
-                  <span className="app-glyph"><AppIcon executable={iconInstall?.executable} size={26} /></span>
-                  <div>
-                    <h3>{app.name}</h3>
-                    <p>{app.installations.length ? app.installations.map((item) => `${formatVersion(item.version)}${item.runnable ? "" : " — incompatible"}`).join(", ") : "Not detected"}</p>
-                    {!app.launchable && app.installations.length ? <small className="vcs-note">Detected — used for project version control</small> : null}
-                    {app.launchable && hasIncompatible ? <small className="vcs-note">Some versions are built for another architecture and are skipped on launch.</small> : null}
+                <Card key={app.id}><CardContent className="flex items-start gap-3 p-4">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary"><AppIcon executable={iconInstall?.executable} size={26} /></span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3>{launchTarget ? <Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name} ${formatVersion(launchTarget.version)}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchApp(app.id, launchTarget.executable)); }}>Launch</Button> : null}</div>
+                    <div className="mt-1.5 flex flex-wrap gap-1">{app.installations.length ? app.installations.map((item) => <Badge key={item.executable} variant={item.runnable ? "secondary" : "outline"} className={item.runnable ? "" : "text-muted-foreground line-through"}>{formatVersion(item.version)}</Badge>) : <span className="text-sm text-muted-foreground">Not detected</span>}</div>
+                    {!app.launchable && app.installations.length ? <p className="mt-1.5 text-xs text-primary">Detected — used for project version control</p> : null}
+                    {app.launchable && hasIncompatible ? <p className="mt-1.5 text-xs text-muted-foreground">Some versions are built for another architecture and are skipped on launch.</p> : null}
                   </div>
-                  {app.launchable && launchTarget ? <button className="outline-button" onClick={() => { if (window.confirm(`Launch ${app.name} ${formatVersion(launchTarget.version)}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchApp(app.id, launchTarget.executable)); }}>Launch</button> : null}
-                </article>
+                </CardContent></Card>
               );
             })}</div>
           </section>
         ))}
         {managedApps.length && managedApps.every((app) => app.installations.length === 0) ? <EmptyState text="No applications detected yet. Click Scan now to discover installed creative tools across your drives." /> : null}
-        <form className="action-panel" onSubmit={(event) => { event.preventDefault(); if (window.confirm(`Set a manual executable override for ${overrideApp} ${overrideVersion}?`)) void run("Saving override", async () => { await desktopApi.setManualOverride(overrideApp, overrideVersion, overrideExecutable); await invalidate.apps(); }); }}><h2>Manual override</h2><div className="form-row"><input aria-label="Application ID" value={overrideApp} onChange={(e) => setOverrideApp(e.target.value)} /><input aria-label="Version" required placeholder="2022.3.18" value={overrideVersion} onChange={(e) => setOverrideVersion(e.target.value)} /><input aria-label="Executable path" required placeholder="C:/Tools/app.exe" value={overrideExecutable} onChange={(e) => setOverrideExecutable(e.target.value)} /><button className="primary-button">Save override</button></div></form>
-      </> : null}
-      {activeScreen === "Health" ? <><div className="action-panel"><h2>Run project diagnostics</h2><div className="form-row"><input aria-label="Health project path" placeholder="Project root" value={rootInput} onChange={(e) => setRootInput(e.target.value)} /><button className="primary-button" onClick={() => void run("Running health checks", async () => setHealth(await desktopApi.projectHealth(rootInput)))}>Run checks</button></div></div><div className="issue-grid">{health.length ? health.map((issue) => <article className={`issue-card ${issue.severity}`} key={issue.code}><CircleAlert /><div><h3>{issue.title}</h3><p>{issue.detail}</p><small>{issue.code}</small></div></article>) : <EmptyState text="No health issues reported. Run checks for a registered project." />}</div></> : null}
-      {activeScreen === "Tools" ? <><div className="action-panel"><h2>Curated Tools Hub</h2><p>Vantadeck shows validated, locally cached community metadata. It never executes downloaded installers or scripts automatically.</p>{!isNativeRuntime() ? <p>Open the native desktop app to read your local cache. Network access remains independently opt-in.</p> : null}</div><div className="card-grid">{tools.length ? tools.filter((tool) => tool.reviewState !== "withdrawn").map((tool) => <article className="management-card tool-card" key={tool.id}><Wrench /><div><h3>{tool.name}</h3><p>{tool.description}</p><small>{tool.reviewState} · {tool.license} · checked {tool.lastVerifiedAt}</small></div><button className="outline-button" onClick={() => setStatus(`${tool.sourceUrl} — open this reviewed source in your browser.`)}>Source</button></article>) : <EmptyState text="No validated tool index is cached. Use the CLI cache command after reviewing an index source." />}</div></> : null}
-      {activeScreen === "Settings" ? <div className="settings-grid"><div className="action-panel"><h2>Appearance</h2><label>Theme<select aria-label="Settings theme" value={preference} onChange={(event) => setPreference(event.target.value as ThemePreference)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label></div>
-        <div className="action-panel"><h2>Updates</h2>{update?.available ? <p>Version <strong>{update.version}</strong> is available (you have {update.currentVersion}).{update.notes ? <><br /><small>{update.notes}</small></> : null}</p> : <p>{update ? `You are on the latest version (${update.currentVersion}).` : "Check for a newer signed release. Updates are verified against Vantadeck's signing key before installation."}</p>}<div className="form-row"><button className="outline-button" onClick={() => void run("Checking for updates", async () => { const info = await desktopApi.checkForUpdate(); setUpdate(info); setStatus(info.available ? `Update ${info.version} is available.` : "You are on the latest version."); })}><RefreshCw size={15} /> Check for updates</button>{update?.available ? <button className="primary-button" onClick={() => { if (window.confirm(`Download and install version ${update.version} now? Vantadeck will restart.`)) void run("Installing update", () => desktopApi.installUpdate()); }}><Download size={15} /> Install &amp; restart</button> : null}</div></div>
-        <div className="action-panel"><h2>Runtime</h2><p>{runtimeLabel}. Network operations are disabled by default; all indexed data is stored locally.</p></div></div> : null}
-      {status ? <output className="operation-status">{status}</output> : null}
+        <form onSubmit={(event) => { event.preventDefault(); if (window.confirm(`Set a manual executable override for ${overrideApp} ${overrideVersion}?`)) void run("Saving override", async () => { await desktopApi.setManualOverride(overrideApp, overrideVersion, overrideExecutable); await invalidate.apps(); }); }}>
+          <Panel title="Manual override">
+            <div className="flex flex-wrap gap-2">
+              <Input aria-label="Application ID" value={overrideApp} onChange={(e) => setOverrideApp(e.target.value)} className="w-40" />
+              <Input aria-label="Version" required placeholder="2022.3.18" value={overrideVersion} onChange={(e) => setOverrideVersion(e.target.value)} className="w-40" />
+              <Input aria-label="Executable path" required placeholder="C:/Tools/app.exe" value={overrideExecutable} onChange={(e) => setOverrideExecutable(e.target.value)} className="flex-1 min-w-48" />
+              <Button type="submit">Save override</Button>
+            </div>
+          </Panel>
+        </form>
+      </div> : null}
+
+      {activeScreen === "Health" ? <div className="space-y-4">
+        <Panel title="Run project diagnostics">
+          <div className="flex flex-wrap gap-2"><Input aria-label="Health project path" placeholder="Project root" value={rootInput} onChange={(e) => setRootInput(e.target.value)} className="flex-1 min-w-48" /><Button onClick={() => void run("Running health checks", async () => setHealth(await desktopApi.projectHealth(rootInput)))}>Run checks</Button></div>
+        </Panel>
+        <div className="grid gap-3 sm:grid-cols-2">{health.length ? health.map((issue) => (
+          <Card key={issue.code} className={cn("border-l-4", issue.severity === "error" ? "border-l-destructive" : "border-l-primary")}><CardContent className="flex items-start gap-3 p-4">
+            <CircleAlert className={issue.severity === "error" ? "text-destructive" : "text-primary"} />
+            <div><h3 className="font-medium">{issue.title}</h3><p className="text-sm text-muted-foreground">{issue.detail}</p><small className="text-xs text-muted-foreground">{issue.code}</small></div>
+          </CardContent></Card>
+        )) : <EmptyState text="No health issues reported. Run checks for a registered project." />}</div>
+      </div> : null}
+
+      {activeScreen === "Tools" ? <div className="space-y-4">
+        <Panel title="Curated Tools Hub" description="Vantadeck shows validated, locally cached community metadata. It never executes downloaded installers or scripts automatically.">
+          {!isNativeRuntime() ? <p className="text-sm text-muted-foreground">Open the native desktop app to read your local cache. Network access remains independently opt-in.</p> : null}
+        </Panel>
+        <div className="grid gap-3 sm:grid-cols-2">{tools.length ? tools.filter((tool) => tool.reviewState !== "withdrawn").map((tool) => (
+          <Card key={tool.id}><CardContent className="flex items-start gap-3 p-4">
+            <Wrench className="text-primary" />
+            <div className="min-w-0 flex-1"><h3 className="font-medium">{tool.name}</h3><p className="text-sm text-muted-foreground">{tool.description}</p><small className="text-xs text-muted-foreground">{tool.reviewState} · {tool.license} · checked {tool.lastVerifiedAt}</small></div>
+            <Button variant="outline" size="sm" onClick={() => toast.message("Reviewed source", { description: `${tool.sourceUrl} — open this in your browser.` })}>Source</Button>
+          </CardContent></Card>
+        )) : <EmptyState text="No validated tool index is cached. Use the CLI cache command after reviewing an index source." />}</div>
+      </div> : null}
+
+      {activeScreen === "Settings" ? <div className="grid gap-4 sm:grid-cols-2">
+        <Panel title="Appearance"><label className="flex items-center gap-3 text-sm">Theme<select aria-label="Settings theme" className={themeSelectClass} value={preference} onChange={(event) => setPreference(event.target.value as ThemePreference)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label></Panel>
+        <Panel title="Updates">
+          {update?.available ? <p className="text-sm">Version <strong>{update.version}</strong> is available (you have {update.currentVersion}).{update.notes ? <><br /><span className="text-muted-foreground">{update.notes}</span></> : null}</p> : <p className="text-sm text-muted-foreground">{update ? `You are on the latest version (${update.currentVersion}).` : "Check for a newer signed release. Updates are verified against Vantadeck's signing key before installation."}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => void run("Checking for updates", async () => { const info = await desktopApi.checkForUpdate(); setUpdate(info); toast.message(info.available ? `Update ${info.version} is available.` : "You are on the latest version."); })}><RefreshCw size={15} /> Check for updates</Button>
+            {update?.available ? <Button onClick={() => { if (window.confirm(`Download and install version ${update.version} now? Vantadeck will restart.`)) void run("Installing update", () => desktopApi.installUpdate()); }}><Download size={15} /> Install &amp; restart</Button> : null}
+          </div>
+        </Panel>
+        <Panel title="Runtime"><p className="text-sm text-muted-foreground">{runtimeLabel}. Network operations are disabled by default; all indexed data is stored locally.</p></Panel>
+      </div> : null}
     </section>
   );
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><strong>VANTADECK</strong><span>LOCAL-FIRST CREATIVE LAUNCHER</span></div>
-        <nav aria-label="Primary navigation">
-          {navigation.map(([label, Icon]) => <button onClick={() => openScreen(label)} className={activeScreen === label ? "nav-item active" : "nav-item"} key={label}><Icon size={20} /><span>{label}</span>{label === "Health" && health.length ? <b>{health.length}</b> : null}</button>)}
+    <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      <aside className="flex w-64 flex-none flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
+        <div className="px-2 py-1"><strong className="block text-lg font-bold tracking-tight text-primary">VANTADECK</strong><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Local-first creative launcher</span></div>
+        <nav aria-label="Primary navigation" className="flex flex-col gap-1">
+          {navigation.map(([label, Icon]) => (
+            <button key={label} onClick={() => openScreen(label)} className={cn("flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", activeScreen === label ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground")}>
+              <Icon size={19} /><span>{label}</span>{label === "Health" && health.length ? <Badge variant="secondary" className="ml-auto">{health.length}</Badge> : null}
+            </button>
+          ))}
         </nav>
-        <div className="system-status"><Laptop size={19} /><span><small>System status</small><strong>Offline &amp; Local</strong><em>All systems operational</em></span></div>
-        <div className="sidebar-footer"><span>v0.1.0</span><span><Code2 size={14} /> Open Source</span></div>
+        <div className="mt-auto flex items-center gap-2.5 rounded-lg bg-secondary/60 p-3">
+          <Laptop size={18} className="text-primary" /><span className="flex flex-col text-xs"><span className="text-muted-foreground">System status</span><strong>Offline &amp; Local</strong><em className="not-italic text-muted-foreground">All systems operational</em></span>
+        </div>
+        <div className="flex items-center justify-between px-2 text-xs text-muted-foreground"><span>v0.1.0</span><span className="flex items-center gap-1"><Code2 size={13} /> Open Source</span></div>
       </aside>
 
-      <main>
-        <header className="topbar">
-          <label className="search"><Search size={19} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search projects, apps, tools, docs..." /><kbd>Ctrl K</kbd></label>
-          <div className="local-state"><Laptop size={16} /> Offline • Local mode</div>
+      <main className="flex flex-1 flex-col overflow-hidden">
+        <header className="flex items-center gap-4 border-b border-border px-6 py-3">
+          <label className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-secondary/50 px-3"><Search size={18} className="text-muted-foreground" /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search projects, apps, tools, docs..." className="h-9 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" /><kbd className="rounded border border-border px-1.5 text-[10px] text-muted-foreground">Ctrl K</kbd></label>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Laptop size={15} /> Offline • Local mode</div>
         </header>
 
-        {update?.available ? <div className="update-banner"><Download size={16} /><span>Vantadeck {update.version} is available.</span><button className="text-link" onClick={() => openScreen("Settings")}>View update</button></div> : null}
+        {update?.available ? <div className="flex items-center gap-2 border-b border-border bg-primary/10 px-6 py-2 text-sm"><Download size={15} className="text-primary" /><span>Vantadeck {update.version} is available.</span><Button variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => openScreen("Settings")}>View update</Button></div> : null}
 
-        <div className="content">
-          {activeScreen === "Home" ? <><section className="continue-section" aria-labelledby="continue-title">
-            <div className="section-label" id="continue-title">Continue Project</div>
-            {continueProject ? <div className="continue-panel">
-              <img src={voidlineImage} alt="Voidline reactor environment" />
-              <div className="continue-details"><h1>{continueProject.name}</h1><p>{continueProject.path}</p><div className="metadata"><span><Box size={15} /> {continueProject.engine} {continueProject.version}</span><span><GitBranch size={14} /> {continueProject.branch}</span><span>Last opened: {continueProject.lastOpened}</span></div><h2>Local project</h2><ul><li><Folder size={15} /> Project metadata and activity stay on this machine.</li><li><FileCode2 size={15} /> Portable settings live in .vantadeck/project.toml.</li></ul></div>
-              <div className="continue-health"><button className="primary-button" onClick={() => openScreen("Projects")}>Open Project</button><div><h2>Health summary</h2>{health.length ? <div className="health-list compact">{health.slice(0, 3).map((issue) => <div className="health-item" key={issue.code}><CircleAlert className={issue.severity} size={17} /><span><strong>{issue.title}</strong><small>{issue.detail}</small></span></div>)}</div> : <EmptyState text="No current health issues." />}</div></div>
-            </div> : <div className="continue-panel empty-continue"><EmptyState text="Import a project to start working locally." /></div>}
-          </section>
+        <div className="flex-1 overflow-y-auto p-6">
+          {activeScreen === "Home" ? <div className="space-y-6">
+            <section aria-labelledby="continue-title">
+              <SectionLabel><span id="continue-title">Continue Project</span></SectionLabel>
+              {continueProject ? <Card className="overflow-hidden"><CardContent className="grid gap-5 p-0 lg:grid-cols-[260px_1fr_280px]">
+                <img src={voidlineImage} alt="Voidline reactor environment" className="h-full max-h-64 w-full object-cover" />
+                <div className="space-y-3 py-5"><h1 className="text-2xl font-semibold">{continueProject.name}</h1><p className="text-sm text-muted-foreground">{continueProject.path}</p>
+                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground"><span className="flex items-center gap-1.5"><Box size={14} /> {continueProject.engine} {continueProject.version}</span><span className="flex items-center gap-1.5"><GitBranch size={13} /> {continueProject.branch}</span><span>Last opened: {continueProject.lastOpened}</span></div>
+                  <ul className="space-y-1.5 text-sm text-muted-foreground"><li className="flex items-center gap-2"><Folder size={14} /> Project metadata and activity stay on this machine.</li><li className="flex items-center gap-2"><FileCode2 size={14} /> Portable settings live in .vantadeck/project.toml.</li></ul>
+                </div>
+                <div className="space-y-3 border-l border-border p-5"><Button className="w-full" onClick={() => openScreen("Projects")}>Open Project</Button>
+                  <div><h2 className="mb-2 text-sm font-semibold">Health summary</h2>{health.length ? <div className="space-y-2">{health.slice(0, 3).map((issue) => <div key={issue.code} className="flex items-start gap-2 text-sm"><CircleAlert className={issue.severity === "error" ? "text-destructive" : "text-primary"} size={16} /><span><strong className="block">{issue.title}</strong><small className="text-muted-foreground">{issue.detail}</small></span></div>)}</div> : <EmptyState text="No current health issues." />}</div>
+                </div>
+              </CardContent></Card> : <Card><CardContent className="p-6"><EmptyState text="Import a project to start working locally." /></CardContent></Card>}
+            </section>
 
-          <section className="workspace">
-            <div className="projects-pane">
-              <div className="tabs" role="tablist"><button role="tab" aria-selected={projectView === "pinned"} onClick={() => setProjectView("pinned")}>Pinned Projects</button><button role="tab" aria-selected={projectView === "recent"} onClick={() => setProjectView("recent")}>Recent Projects</button></div>
-              <ProjectTable projects={filteredProjects} onOpen={() => openScreen("Projects")} />
-              <button className="text-link" onClick={() => openScreen("Projects")}>View all projects <ChevronRight size={17} /></button>
-            </div>
-            <aside className="right-rail">
-              <section className="rail-section"><div className="rail-title">Project Health <button onClick={() => openScreen("Health")}>View All ({health.length})</button></div>{health.length ? <div className="health-list">{health.slice(0, 3).map((issue) => <div className="health-item" key={issue.code}><CircleAlert className={issue.severity} size={17} /><span><strong>{issue.title}</strong><small>{issue.detail}</small></span></div>)}</div> : <EmptyState text="No current health issues." />}</section>
-              <section className="rail-section"><div className="rail-title">Installed Apps <button onClick={() => openScreen("Applications")}>Manage</button></div><div className="apps-list">{installedApps.map((app) => <button className="app-row" onClick={() => openScreen("Applications")} key={app.name}><span className="app-glyph"><AppWindow size={19} /></span><span><strong>{app.name}</strong>{app.versions.map((version) => <small key={version}>{version}</small>)}</span><ChevronRight size={16} /></button>)}</div></section>
-            </aside>
-          </section></> : managementContent}
+            <section className="grid gap-5 lg:grid-cols-[1fr_320px]">
+              <div className="space-y-3">
+                <div className="flex gap-2" role="tablist">
+                  <button role="tab" aria-selected={projectView === "pinned"} onClick={() => setProjectView("pinned")} className={cn("rounded-lg px-3 py-1.5 text-sm", projectView === "pinned" ? "bg-secondary font-medium" : "text-muted-foreground hover:text-foreground")}>Pinned Projects</button>
+                  <button role="tab" aria-selected={projectView === "recent"} onClick={() => setProjectView("recent")} className={cn("rounded-lg px-3 py-1.5 text-sm", projectView === "recent" ? "bg-secondary font-medium" : "text-muted-foreground hover:text-foreground")}>Recent Projects</button>
+                </div>
+                <ProjectTable projects={filteredProjects} onOpen={() => openScreen("Projects")} />
+                <Button variant="link" className="px-0" onClick={() => openScreen("Projects")}>View all projects <ChevronRight size={16} /></Button>
+              </div>
+              <aside className="space-y-4">
+                <Card><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-sm font-semibold">Project Health <Button variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => openScreen("Health")}>View All ({health.length})</Button></div>{health.length ? <div className="space-y-2">{health.slice(0, 3).map((issue) => <div key={issue.code} className="flex items-start gap-2 text-sm"><CircleAlert className={issue.severity === "error" ? "text-destructive" : "text-primary"} size={16} /><span><strong className="block">{issue.title}</strong><small className="text-muted-foreground">{issue.detail}</small></span></div>)}</div> : <EmptyState text="No current health issues." />}</CardContent></Card>
+                <Card><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-sm font-semibold">Installed Apps <Button variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => openScreen("Applications")}>Manage</Button></div><div className="space-y-1">{installedApps.map((app) => <button key={app.name} onClick={() => openScreen("Applications")} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted/50"><span className="flex h-8 w-8 items-center justify-center rounded-md bg-secondary"><AppWindow size={18} /></span><span className="flex-1"><strong className="block">{app.name}</strong><small className="text-xs text-muted-foreground">{app.versions.join(", ")}</small></span><ChevronRight size={15} className="text-muted-foreground" /></button>)}</div></CardContent></Card>
+              </aside>
+            </section>
+          </div> : managementContent}
         </div>
 
-        <footer className="quick-launch"><span className="quick-title">Quick Launch</span>{installedApps.slice(0, 5).map((app) => <button key={app.id} onClick={() => openScreen("Applications")}><AppWindow size={22} /><span>{app.name}</span></button>)}{installedApps.length === 0 ? <button onClick={() => openScreen("Applications")}><Search size={22} /><span>Detect applications</span></button> : null}<label className="theme-control"><Settings size={16} /><span>Theme</span><select aria-label="Theme" value={preference} onChange={(event) => setPreference(event.target.value as ThemePreference)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label></footer>
+        <footer className="flex items-center gap-2 border-t border-border px-6 py-2.5">
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Launch</span>
+          {installedApps.slice(0, 5).map((app) => <Button key={app.id} variant="ghost" size="sm" onClick={() => openScreen("Applications")}><AppWindow size={18} /> {app.name}</Button>)}
+          {installedApps.length === 0 ? <Button variant="ghost" size="sm" onClick={() => openScreen("Applications")}><Search size={18} /> Detect applications</Button> : null}
+          <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground"><Settings size={15} /> Theme<select aria-label="Theme" className={themeSelectClass} value={preference} onChange={(event) => setPreference(event.target.value as ThemePreference)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+        </footer>
       </main>
     </div>
   );
@@ -279,7 +409,10 @@ const queryClient = createQueryClient();
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AppShell />
+      <TooltipProvider>
+        <AppShell />
+        <Toaster richColors position="bottom-right" />
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }

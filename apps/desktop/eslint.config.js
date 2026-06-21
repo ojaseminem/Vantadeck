@@ -16,5 +16,10 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }]
     }
+  },
+  {
+    // Generated shadcn/ui primitives export variant helpers alongside components.
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    rules: { "react-refresh/only-export-components": "off" }
   }
 );

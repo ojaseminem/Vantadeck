@@ -25,8 +25,10 @@ export function useTheme() {
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
-      document.documentElement.dataset.theme = resolveTheme(preference, media.matches);
-      document.documentElement.style.colorScheme = resolveTheme(preference, media.matches);
+      const resolved = resolveTheme(preference, media.matches);
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+      document.documentElement.classList.toggle("dark", resolved === "dark");
     };
     apply();
     media.addEventListener("change", apply);
