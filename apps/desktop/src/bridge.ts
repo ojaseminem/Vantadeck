@@ -49,7 +49,8 @@ export const APP_CATEGORY_LABELS: Record<string, string> = {
 export function formatVersion(version: string): string {
   return version === "0.0.0" ? "Unknown version" : version;
 }
-export type GitStatus = { branch?: string; changedFiles: Array<{ path: string; status: string }> };
+export type GitStatus = { branch?: string; ahead: number; behind: number; changedFiles: Array<{ path: string; status: string }> };
+export type GitCommit = { hash: string; shortHash: string; author: string; date: string; subject: string };
 export type ToolManifest = {
   id: string;
   name: string;
@@ -129,5 +130,8 @@ export const desktopApi = {
   gitSwitch: (root: string, branch: string, confirmed: boolean) => invokeDesktop("git_switch", { root, branch, confirmed }),
   gitBranches: (root: string) => invokeDesktop<string[]>("git_branches", { root }),
   gitCreateBranch: (root: string, branch: string, confirmed: boolean) => invokeDesktop("git_create_branch", { root, branch, confirmed }),
+  gitLog: (root: string, limit: number) => invokeDesktop<GitCommit[]>("git_log", { root, limit }),
+  gitDiff: (root: string, path: string) => invokeDesktop<string>("git_diff", { root, path }),
+  gitCommitPaths: (root: string, message: string, paths: string[], confirmed: boolean) => invokeDesktop("git_commit_paths", { root, message, paths, confirmed }),
   appVersion: () => invokeDesktop<string>("app_version"),
 };

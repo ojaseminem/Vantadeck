@@ -18,7 +18,21 @@ pub use p4::*;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VcsStatus {
     pub branch: Option<String>,
+    #[serde(default)]
+    pub ahead: u32,
+    #[serde(default)]
+    pub behind: u32,
     pub changed_files: Vec<ChangedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub author: String,
+    pub date: String,
+    pub subject: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,6 +141,73 @@ impl GitProvider {
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
             .collect())
+    }
+
+    /// Recent commit history.
+    pub async fn log(&self, root: &Path, limit: u32) -> Result<Vec<GitCommit>, VcsError> {
+        // Unit separator (\x1f) between fields, record separator (\x1e) between commits.
+        let format = "--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e";
+        let output = self
+            .run(root, &["log", &format!("-n{limit}"), "--date=short", format])
+            .await?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        Ok(text
+            .split('\u{1e}')
+            .filter_map(|record| {
+                let record = record.trim_start_matches('\n');
+                if record.trim().is_empty() {
+                    return None;
+                }
+                let fields: Vec<&str> = record.split('\u{1f}').collect();
+                if fields.len() < 5 {
+                    return None;
+                }
+                Some(GitCommit {
+                    hash: fields[0].to_owned(),
+                    short_hash: fields[1].to_owned(),
+                    author: fields[2].to_owned(),
+                    date: fields[3].to_owned(),
+                    subject: fields[4].to_owned(),
+                })
+            })
+            .collect())
+    }
+
+    /// Diff for a single path (working tree vs HEAD; falls back for untracked).
+    pub async fn diff(&self, root: &Path, path: &str) -> Result<String, VcsError> {
+        let output = self.run_raw(root, &["diff", "HEAD", "--", path]).await?;
+        let diff = String::from_utf8_lossy(&output.stdout).into_owned();
+        if !diff.trim().is_empty() {
+            return Ok(diff);
+        }
+        // Untracked/new file: show its current contents as an addition-style view.
+        let untracked = self
+            .run_raw(root, &["diff", "--no-index", "--", "/dev/null", path])
+            .await
+            .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+            .unwrap_or_default();
+        Ok(untracked)
+    }
+
+    /// Stages and commits only the given paths.
+    pub async fn commit_paths(
+        &self,
+        root: &Path,
+        message: &str,
+        paths: &[String],
+    ) -> Result<VcsOperationResult, VcsError> {
+        if message.trim().is_empty() {
+            return Err(VcsError::EmptyCommitMessage);
+        }
+        if paths.is_empty() {
+            return self.commit_all(root, message).await;
+        }
+        let mut add_args = vec!["add", "--"];
+        add_args.extend(paths.iter().map(String::as_str));
+        self.run(root, &add_args).await?;
+        let mut commit_args = vec!["commit", "-m", message, "--"];
+        commit_args.extend(paths.iter().map(String::as_str));
+        self.operation(root, &commit_args).await
     }
 
     pub async fn lfs_probe(&self, root: &Path, large_file_threshold: u64) -> LfsProbe {
@@ -326,11 +407,22 @@ fn health_issue(
 pub fn parse_git_porcelain_v2(input: &str) -> Result<VcsStatus, VcsError> {
     let mut status = VcsStatus {
         branch: None,
+        ahead: 0,
+        behind: 0,
         changed_files: Vec::new(),
     };
     for line in input.lines() {
         if let Some(branch) = line.strip_prefix("# branch.head ") {
             status.branch = (branch != "(detached)").then(|| branch.to_owned());
+        } else if let Some(ab) = line.strip_prefix("# branch.ab ") {
+            // Format: "+<ahead> -<behind>"
+            for token in ab.split_whitespace() {
+                if let Some(value) = token.strip_prefix('+') {
+                    status.ahead = value.parse().unwrap_or(0);
+                } else if let Some(value) = token.strip_prefix('-') {
+                    status.behind = value.parse().unwrap_or(0);
+                }
+            }
         } else if let Some(path) = line.strip_prefix("? ") {
             status.changed_files.push(ChangedFile {
                 path: path.to_owned(),

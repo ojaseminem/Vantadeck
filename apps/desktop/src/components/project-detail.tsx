@@ -15,6 +15,13 @@ import { HealthPanel } from "./health-panel";
 import { desktopApi, isNativeRuntime, type HealthIssue } from "../bridge";
 import { loadWorkspace, newId, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
 
+function diffLineClass(line: string): string {
+  if (line.startsWith("@@")) return "text-primary";
+  if (line.startsWith("+") && !line.startsWith("+++")) return "text-[color:oklch(0.72_0.15_150)]";
+  if (line.startsWith("-") && !line.startsWith("---")) return "text-destructive";
+  return "text-muted-foreground";
+}
+
 function timeAgo(epochSeconds: number): string {
   if (!epochSeconds) return "";
   const diff = Math.max(0, Date.now() / 1000 - epochSeconds);
@@ -31,6 +38,11 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
   const git = useQuery({ queryKey: ["git-status", project.path], queryFn: () => desktopApi.gitStatus(project.path), enabled: native, retry: false });
   const files = useQuery({ queryKey: ["recent-files", project.path], queryFn: () => desktopApi.recentFiles(project.path, 25), enabled: native });
   const branches = useQuery({ queryKey: ["git-branches", project.path], queryFn: () => desktopApi.gitBranches(project.path), enabled: native, retry: false });
+  const [sourceView, setSourceView] = useState<"changes" | "history">("changes");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [diffPath, setDiffPath] = useState<string | null>(null);
+  const commits = useQuery({ queryKey: ["git-log", project.path], queryFn: () => desktopApi.gitLog(project.path, 30), enabled: native && sourceView === "history", retry: false });
+  const diff = useQuery({ queryKey: ["git-diff", project.path, diffPath], queryFn: () => desktopApi.gitDiff(project.path, diffPath as string), enabled: native && !!diffPath, retry: false });
   const [health, setHealth] = useState<HealthIssue[]>([]);
   const [ws, setWs] = useState<ProjectWorkspace>(() => loadWorkspace(project.path));
   const [todoText, setTodoText] = useState("");
@@ -39,6 +51,26 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
   const [commit, setCommit] = useState("");
 
   useEffect(() => saveWorkspace(project.path, ws), [project.path, ws]);
+
+  useEffect(() => {
+    const paths = git.data?.changedFiles.map((file) => file.path) ?? [];
+    setSelected(new Set(paths));
+    setDiffPath((current) => (current && paths.includes(current) ? current : null));
+  }, [git.data]);
+
+  function toggleSelected(path: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  }
+  function commitSelected() {
+    if (!commit.trim() || selected.size === 0) return;
+    if (window.confirm(`Commit ${selected.size} file(s) in ${project.name}?`)) {
+      void run("Committing", async () => { await desktopApi.gitCommitPaths(project.path, commit, [...selected], true); setCommit(""); setDiffPath(null); await refreshGit(); });
+    }
+  }
 
   async function run(label: string, action: () => Promise<unknown>) {
     try { await action(); toast.success(`${label} complete.`); }
@@ -123,30 +155,45 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <div className="flex shrink-0 items-center gap-1">
-                    <Button variant="ghost" size="sm" disabled={!native} onClick={() => { if (window.confirm(`Pull changes into ${project.name}?`)) void run("Pulling", async () => { await desktopApi.gitSync(project.path, true); await refreshGit(); }); }}><Download size={14} /> Pull</Button>
-                    <Button variant="ghost" size="sm" disabled={!native} onClick={() => { if (window.confirm(`Push ${project.name} to its remote?`)) void run("Pushing", () => desktopApi.gitPush(project.path, true)); }}><Upload size={14} /> Push</Button>
+                    <Button variant="ghost" size="sm" disabled={!native} onClick={() => { if (window.confirm(`Pull changes into ${project.name}?`)) void run("Pulling", async () => { await desktopApi.gitSync(project.path, true); await refreshGit(); }); }}><Download size={14} /> Pull{git.data?.behind ? ` ${git.data.behind}` : ""}</Button>
+                    <Button variant="ghost" size="sm" disabled={!native} onClick={() => { if (window.confirm(`Push ${project.name} to its remote?`)) void run("Pushing", () => desktopApi.gitPush(project.path, true)); }}><Upload size={14} /> Push{git.data?.ahead ? ` ${git.data.ahead}` : ""}</Button>
                     <Button variant="ghost" size="icon" disabled={!native} aria-label="Refresh status" onClick={() => void refreshGit()}><RefreshCw size={14} /></Button>
                   </div>
                 </div>
-                <div className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{git.data ? `${git.data.changedFiles.length} changed file${git.data.changedFiles.length === 1 ? "" : "s"}` : "Reading status…"}</div>
-                <div className="max-h-[380px] overflow-y-auto">
-                  {git.data && git.data.changedFiles.length ? git.data.changedFiles.map((file) => (
-                    <div key={file.path} className="flex items-center gap-2 border-t border-border px-4 py-1.5 text-sm">
-                      <FileCode2 size={14} className="shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>
-                      <Badge variant="outline" className="shrink-0 text-[10px] uppercase">{file.status}</Badge>
+                <div className="flex items-center gap-3 border-t border-border px-4 py-1.5 text-sm">
+                  <button onClick={() => setSourceView("changes")} className={sourceView === "changes" ? "font-medium" : "text-muted-foreground hover:text-foreground"}>Changes{git.data ? ` (${git.data.changedFiles.length})` : ""}</button>
+                  <button onClick={() => setSourceView("history")} className={sourceView === "history" ? "font-medium" : "text-muted-foreground hover:text-foreground"}>History</button>
+                </div>
+                {sourceView === "changes" ? (
+                  <>
+                    <div className="max-h-[300px] overflow-y-auto">
+                      {git.data && git.data.changedFiles.length ? git.data.changedFiles.map((file) => (
+                        <div key={file.path} className={`flex items-center gap-2 border-t border-border px-3 py-1.5 text-sm ${diffPath === file.path ? "bg-muted/50" : ""}`}>
+                          <input type="checkbox" aria-label={`Include ${file.path}`} checked={selected.has(file.path)} onChange={() => toggleSelected(file.path)} className="size-4 accent-[var(--primary)]" />
+                          <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setDiffPath(file.path)}><FileCode2 size={14} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span></button>
+                          <Badge variant="outline" className="shrink-0 text-[10px] uppercase">{file.status}</Badge>
+                        </div>
+                      )) : <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">No local changes — working tree clean.</div>}
                     </div>
-                  )) : <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">No local changes — working tree clean.</div>}
+                    <div className="space-y-2 border-t border-border p-3">
+                      <Input aria-label="Commit message" placeholder="Summary of changes" value={commit} onChange={(e) => setCommit(e.target.value)} />
+                      <Button className="w-full" disabled={!native || !commit.trim() || selected.size === 0} onClick={commitSelected}><GitCommitHorizontal size={15} /> Commit {selected.size} to {git.data?.branch ?? "branch"}</Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="max-h-[420px] overflow-y-auto">
+                    {commits.data && commits.data.length ? commits.data.map((entry) => (
+                      <div key={entry.hash} className="border-t border-border px-4 py-2"><p className="truncate text-sm font-medium">{entry.subject}</p><p className="text-xs text-muted-foreground">{entry.shortHash} · {entry.author} · {entry.date}</p></div>
+                    )) : <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">{commits.isLoading ? "Loading…" : "No commits yet."}</div>}
+                  </div>
+                )}
+              </CardContent></Card>
+              <Card><CardContent className="p-0">
+                <div className="truncate border-b border-border px-4 py-2.5 text-sm font-semibold">{diffPath ?? "Diff"}</div>
+                <div className="max-h-[480px] overflow-auto p-3">
+                  {diffPath ? (diff.data !== undefined ? <pre className="overflow-x-auto font-mono text-xs leading-relaxed">{(diff.data || "").split("\n").map((line, index) => <div key={index} className={diffLineClass(line)}>{line || " "}</div>)}</pre> : <p className="text-sm text-muted-foreground">{diff.isLoading ? "Loading diff…" : "No diff to show."}</p>) : <p className="text-sm text-muted-foreground">Select a file to view its changes.</p>}
                 </div>
               </CardContent></Card>
-              <div className="space-y-4">
-                <Card><CardContent className="space-y-2 p-4">
-                  <h3 className="text-sm font-semibold">Commit</h3>
-                  <Input aria-label="Commit message" placeholder={`Summary of changes`} value={commit} onChange={(e) => setCommit(e.target.value)} />
-                  <Button className="w-full" disabled={!native || !commit.trim() || !(git.data && git.data.changedFiles.length)} onClick={() => { if (window.confirm(`Commit all changes in ${project.name}?`)) void run("Committing", async () => { await desktopApi.gitCommit(project.path, commit, true); setCommit(""); await refreshGit(); }); }}><GitCommitHorizontal size={15} /> Commit to {git.data?.branch ?? "branch"}</Button>
-                  <p className="text-xs text-muted-foreground">Stages all changes and commits. Switch branches from the menu above.</p>
-                </CardContent></Card>
-              </div>
             </div>
           )}
         </TabsContent>

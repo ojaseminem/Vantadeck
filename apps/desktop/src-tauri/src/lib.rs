@@ -125,6 +125,8 @@ struct DesktopDashboard {
 #[serde(rename_all = "camelCase")]
 struct DesktopGitStatus {
     branch: Option<String>,
+    ahead: u32,
+    behind: u32,
     changed_files: Vec<DesktopChangedFile>,
 }
 
@@ -285,6 +287,8 @@ async fn git_status(
         .map_err(|e| e.to_string())?;
     Ok(DesktopGitStatus {
         branch: status.branch,
+        ahead: status.ahead,
+        behind: status.behind,
         changed_files: status
             .changed_files
             .into_iter()
@@ -294,6 +298,48 @@ async fn git_status(
             })
             .collect(),
     })
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn git_log(
+    root: String,
+    limit: u32,
+    state: State<'_, DesktopState>,
+) -> Result<Vec<vantadeck_vcs::GitCommit>, String> {
+    state
+        .service
+        .vcs_log(Path::new(&root), limit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn git_diff(
+    root: String,
+    path: String,
+    state: State<'_, DesktopState>,
+) -> Result<String, String> {
+    state
+        .service
+        .vcs_diff(Path::new(&root), &path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+async fn git_commit_paths(
+    root: String,
+    message: String,
+    paths: Vec<String>,
+    confirmed: bool,
+    state: State<'_, DesktopState>,
+) -> Result<VcsOperationResult, String> {
+    require_confirmation(confirmed)?;
+    state
+        .service
+        .vcs_commit_paths(Path::new(&root), &message, &paths, confirmed)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -584,20 +630,26 @@ struct UpdateInfo {
 #[tauri::command]
 async fn check_for_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
     let current_version = app.package_info().version.to_string();
-    let updater = app.updater().map_err(|e| e.to_string())?;
-    match updater.check().await.map_err(|e| e.to_string())? {
-        Some(update) => Ok(UpdateInfo {
+    let up_to_date = UpdateInfo {
+        available: false,
+        version: current_version.clone(),
+        current_version: current_version.clone(),
+        notes: None,
+    };
+    // No published release feed yet (or it's unreachable) is a normal state, not
+    // an error — treat it as "you're on the latest version" rather than surfacing
+    // a scary "could not fetch release JSON" message.
+    let Ok(updater) = app.updater() else {
+        return Ok(up_to_date);
+    };
+    match updater.check().await {
+        Ok(Some(update)) => Ok(UpdateInfo {
             available: true,
             current_version,
             version: update.version.clone(),
             notes: update.body.clone(),
         }),
-        None => Ok(UpdateInfo {
-            available: false,
-            version: current_version.clone(),
-            current_version,
-            notes: None,
-        }),
+        Ok(None) | Err(_) => Ok(up_to_date),
     }
 }
 
@@ -850,6 +902,9 @@ pub fn run() {
             git_switch,
             git_branches,
             git_create_branch,
+            git_log,
+            git_diff,
+            git_commit_paths,
             app_version
         ])
         .run(tauri::generate_context!())

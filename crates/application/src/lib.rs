@@ -35,7 +35,7 @@ use vantadeck_storage::{
     ActivityRecord, ManualOverrideRecord, RegisteredProject, Storage, StorageError,
 };
 use vantadeck_vcs::{
-    GitProvider, VcsError, VcsOperationResult, VcsStatus, VersionControlProvider,
+    GitCommit, GitProvider, VcsError, VcsOperationResult, VcsStatus, VersionControlProvider,
     evaluate_lfs_health,
 };
 
@@ -481,6 +481,29 @@ impl ApplicationService {
     ) -> Result<VcsOperationResult, ApplicationError> {
         require_confirmation("Git branch creation", confirmed)?;
         Ok(self.git.create_branch(root, branch).await?)
+    }
+
+    pub async fn vcs_log(
+        &self,
+        root: &Path,
+        limit: u32,
+    ) -> Result<Vec<GitCommit>, ApplicationError> {
+        Ok(self.git.log(root, limit).await?)
+    }
+
+    pub async fn vcs_diff(&self, root: &Path, path: &str) -> Result<String, ApplicationError> {
+        Ok(self.git.diff(root, path).await?)
+    }
+
+    pub async fn vcs_commit_paths(
+        &self,
+        root: &Path,
+        message: &str,
+        paths: &[String],
+        confirmed: bool,
+    ) -> Result<VcsOperationResult, ApplicationError> {
+        require_confirmation("Git commit", confirmed)?;
+        Ok(self.git.commit_paths(root, message, paths).await?)
     }
 
     pub async fn vcs_sync(
