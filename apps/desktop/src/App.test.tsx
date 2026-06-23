@@ -65,7 +65,7 @@ describe("dashboard projects", () => {
   it("focuses global search with Ctrl+K", async () => {
     render(<App />);
     await userEvent.keyboard("{Control>}k{/Control}");
-    expect(screen.getByPlaceholderText("Search projects, apps, tools, docs...")).toHaveFocus();
+    expect(screen.getByPlaceholderText(/^Search /i)).toHaveFocus();
   });
 
   it("navigates to Projects when clicking 'View all projects' button", async () => {

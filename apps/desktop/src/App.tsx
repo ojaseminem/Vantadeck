@@ -3,8 +3,11 @@ import {
   Activity,
   AppWindow,
   Box,
+  ChevronDown,
   ChevronRight,
   CircleAlert,
+  ArrowLeft,
+  ArrowRight,
   Clipboard,
   Code2,
   Download,
@@ -71,6 +74,9 @@ function prettyEngine(engine: string): string {
   if (!engine) return "Project";
   return engine.replace(/[-_]/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
+
+const SEARCH_SCOPES = ["all", "projects", "apps", "tools", "health"] as const;
+const SCOPE_LABELS: Record<string, string> = { all: "All", projects: "Projects", apps: "Apps", tools: "Tools", health: "Health" };
 
 const themeSelectClass =
   "h-8 rounded-md border border-border bg-secondary px-2 text-sm text-secondary-foreground focus:outline-none focus:ring-2 focus:ring-ring";
@@ -156,6 +162,8 @@ function AppShell() {
   const [activeScreen, setActiveScreen] = useState<Screen>("Home");
   const [projectView, setProjectView] = useState<"pinned" | "recent">("pinned");
   const [query, setQuery] = useState("");
+  const [searchScope, setSearchScope] = useState<"all" | "projects" | "apps" | "tools" | "health">("all");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [continueProject, setContinueProject] = useState<Project | null>(isDemoMode() ? sampleContinueProject : null);
   const [pinnedProjects, setPinnedProjects] = useState(isDemoMode() ? defaultPinned : []);
   const [recentProjects, setRecentProjects] = useState(isDemoMode() ? defaultRecent : []);
@@ -185,6 +193,9 @@ function AppShell() {
   const [selectedProject, setSelectedProject] = useState<{ path: string; name: string } | null>(null);
   const undoStack = useRef<UndoEntry[]>([]);
   const redoStack = useRef<UndoEntry[]>([]);
+  const navHistory = useRef<Array<{ screen: Screen; project: { path: string; name: string } | null }>>([{ screen: "Home", project: null }]);
+  const navIndex = useRef(0);
+  const [nav, setNav] = useState({ canBack: false, canForward: false });
   const searchRef = useRef<HTMLInputElement>(null);
   const { preference, setPreference } = useTheme();
   const projects = projectView === "pinned" ? pinnedProjects : recentProjects;
@@ -241,9 +252,17 @@ function AppShell() {
       if (meta && key === "k") { event.preventDefault(); searchRef.current?.focus(); }
       else if (meta && key === "z" && !event.shiftKey) { event.preventDefault(); void undoLast(); }
       else if (meta && (key === "y" || (key === "z" && event.shiftKey))) { event.preventDefault(); void redoLast(); }
+      else if (event.altKey && key === "arrowleft") { event.preventDefault(); goBack(); }
+      else if (event.altKey && key === "arrowright") { event.preventDefault(); goForward(); }
+    };
+    // Mouse back/forward buttons (button 3/4), like a browser.
+    const onMouse = (event: MouseEvent) => {
+      if (event.button === 3) { event.preventDefault(); goBack(); }
+      else if (event.button === 4) { event.preventDefault(); goForward(); }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("mouseup", onMouse);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("mouseup", onMouse); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -276,7 +295,7 @@ function AppShell() {
     setPreference(prefs.theme);
     setScanRoots(prefs.scanRoots);
     setOnboarding(false);
-    setActiveScreen("Applications");
+    navigate("Applications");
     if (isNativeRuntime()) void scanWith(prefs.scanRoots);
   }
   function skipOnboarding() {
@@ -284,13 +303,39 @@ function AppShell() {
     setOnboarding(false);
   }
 
+  function applyNavEntry(entry: { screen: Screen; project: { path: string; name: string } | null }) {
+    setActiveScreen(entry.screen);
+    setSelectedProject(entry.project);
+    setNav({ canBack: navIndex.current > 0, canForward: navIndex.current < navHistory.current.length - 1 });
+  }
+  function navigate(screen: Screen, project: { path: string; name: string } | null = null) {
+    const current = navHistory.current[navIndex.current];
+    if (current && current.screen === screen && current.project?.path === project?.path) {
+      applyNavEntry(current);
+      return;
+    }
+    navHistory.current = navHistory.current.slice(0, navIndex.current + 1);
+    navHistory.current.push({ screen, project });
+    navIndex.current = navHistory.current.length - 1;
+    applyNavEntry({ screen, project });
+  }
+  function goBack() {
+    if (navIndex.current <= 0) return;
+    navIndex.current -= 1;
+    applyNavEntry(navHistory.current[navIndex.current]);
+  }
+  function goForward() {
+    if (navIndex.current >= navHistory.current.length - 1) return;
+    navIndex.current += 1;
+    applyNavEntry(navHistory.current[navIndex.current]);
+  }
+
   function openScreen(screen: Screen) {
-    setActiveScreen(screen);
+    navigate(screen, null);
   }
 
   function openProject(target: { path: string; name: string }) {
-    setSelectedProject(target);
-    setActiveScreen("Project");
+    navigate("Project", target);
   }
 
   function addCustomApp(event: FormEvent) {
@@ -335,6 +380,37 @@ function AppShell() {
     if (!item.executable) { openScreen("Applications"); return; }
     void run(`Launching ${item.name}`, () => item.custom ? desktopApi.launchExecutable(item.executable!) : desktopApi.launchApp(item.id, item.executable!));
   }
+
+  const searchResults = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return [] as Array<{ key: string; title: string; subtitle: string; kind: string; onSelect: () => void }>;
+    const inScope = (scope: string) => searchScope === "all" || searchScope === scope;
+    const results: Array<{ key: string; title: string; subtitle: string; kind: string; onSelect: () => void }> = [];
+    if (inScope("projects")) {
+      const seen = new Set<string>();
+      const add = (p: { name: string; path: string }) => {
+        if (seen.has(p.path) || !(p.name.toLowerCase().includes(term) || p.path.toLowerCase().includes(term))) return;
+        seen.add(p.path);
+        results.push({ key: `p:${p.path}`, title: p.name, subtitle: p.path, kind: "Project", onSelect: () => openProject({ path: p.path, name: p.name }) });
+      };
+      [...pinnedProjects, ...recentProjects].forEach(add);
+      registeredProjects.forEach(add);
+    }
+    if (inScope("apps")) {
+      installedApps.filter((a) => a.name.toLowerCase().includes(term)).forEach((a) =>
+        results.push({ key: `a:${a.id}`, title: a.name, subtitle: [...new Set(a.versions.map(formatVersion))].join(", "), kind: "App", onSelect: () => openScreen("Applications") }));
+    }
+    if (inScope("tools")) {
+      tools.filter((t) => t.name.toLowerCase().includes(term) || t.description.toLowerCase().includes(term)).forEach((t) =>
+        results.push({ key: `t:${t.id}`, title: t.name, subtitle: t.description, kind: "Tool", onSelect: () => openScreen("Tools") }));
+    }
+    if (inScope("health")) {
+      health.filter((h) => h.title.toLowerCase().includes(term) || h.detail.toLowerCase().includes(term) || h.code.toLowerCase().includes(term)).forEach((h) =>
+        results.push({ key: `h:${h.code}`, title: h.title, subtitle: h.detail, kind: "Health", onSelect: () => openScreen("Health") }));
+    }
+    return results.slice(0, 12);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, searchScope, pinnedProjects, recentProjects, registeredProjects, installedApps, tools, health]);
 
   async function submitImport(event: FormEvent) {
     event.preventDefault();
@@ -498,8 +574,28 @@ function AppShell() {
       </aside>
 
       <main className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center gap-4 border-b border-border px-6 py-3">
-          <label className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-secondary/50 px-3"><Search size={18} className="text-muted-foreground" /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search projects, apps, tools, docs..." className="h-9 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" /><kbd className="rounded border border-border px-1.5 text-[10px] text-muted-foreground">Ctrl K</kbd></label>
+        <header className="flex items-center gap-3 border-b border-border px-6 py-3">
+          <div className="flex items-center gap-0.5">
+            <Button variant="ghost" size="icon" aria-label="Back" disabled={!nav.canBack} onClick={goBack}><ArrowLeft size={18} /></Button>
+            <Button variant="ghost" size="icon" aria-label="Forward" disabled={!nav.canForward} onClick={goForward}><ArrowRight size={18} /></Button>
+          </div>
+          <div className="relative flex flex-1 items-center gap-1.5 rounded-lg border border-border bg-secondary/50 pl-1 pr-3">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-muted-foreground">{SCOPE_LABELS[searchScope]} <ChevronDown size={13} /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="start">{SEARCH_SCOPES.map((scope) => <DropdownMenuItem key={scope} onClick={() => setSearchScope(scope)}>{SCOPE_LABELS[scope]}</DropdownMenuItem>)}</DropdownMenuContent>
+            </DropdownMenu>
+            <Search size={16} className="shrink-0 text-muted-foreground" />
+            <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} onFocus={() => setSearchOpen(true)} onBlur={() => window.setTimeout(() => setSearchOpen(false), 150)} placeholder={`Search ${SCOPE_LABELS[searchScope].toLowerCase()}…`} className="h-9 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
+            <kbd className="rounded border border-border px-1.5 text-[10px] text-muted-foreground">Ctrl K</kbd>
+            {searchOpen && query.trim() ? <div className="absolute inset-x-0 top-12 z-50 max-h-96 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-xl">
+              {searchResults.length ? searchResults.map((result) => (
+                <button key={result.key} onMouseDown={(event) => { event.preventDefault(); result.onSelect(); setSearchOpen(false); }} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/60">
+                  <span className="min-w-0 flex-1"><strong className="block truncate font-medium">{result.title}</strong><small className="block truncate text-xs text-muted-foreground">{result.subtitle}</small></span>
+                  <Badge variant="outline" className="shrink-0 text-[10px]">{result.kind}</Badge>
+                </button>
+              )) : <div className="px-3 py-4 text-sm text-muted-foreground">No matches in {SCOPE_LABELS[searchScope]}.</div>}
+            </div> : null}
+          </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Laptop size={15} /> Offline • Local mode</div>
         </header>
 
