@@ -26,6 +26,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -175,9 +176,9 @@ function AppShell() {
   const projectsQuery = useProjects(activeScreen === "Projects" || activeScreen === "Health");
   const appsQuery = useApps(activeScreen === "Applications");
   const toolsQuery = useTools(activeScreen === "Tools");
-  const registeredProjects = projectsQuery.data ?? [];
-  const managedApps = appsQuery.data ?? [];
-  const tools = toolsQuery.data ?? [];
+  const registeredProjects = useMemo(() => projectsQuery.data ?? [], [projectsQuery.data]);
+  const managedApps = useMemo(() => appsQuery.data ?? [], [appsQuery.data]);
+  const tools = useMemo(() => toolsQuery.data ?? [], [toolsQuery.data]);
   const invalidate = useInvalidate();
   const [rootInput, setRootInput] = useState("");
   const [nameInput, setNameInput] = useState("");
@@ -193,6 +194,7 @@ function AppShell() {
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
   const [onboarding, setOnboarding] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<{ path: string; name: string } | null>(null);
   const undoStack = useRef<UndoEntry[]>([]);
   const redoStack = useRef<UndoEntry[]>([]);
@@ -262,7 +264,7 @@ function AppShell() {
     const onKey = (event: KeyboardEvent) => {
       const meta = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
-      if (meta && key === "k") { event.preventDefault(); searchRef.current?.focus(); }
+      if (meta && key === "k") { event.preventDefault(); setPaletteOpen((open) => !open); }
       else if (meta && key === "z" && !event.shiftKey) { event.preventDefault(); void undoLast(); }
       else if (meta && (key === "y" || (key === "z" && event.shiftKey))) { event.preventDefault(); void redoLast(); }
       else if (event.altKey && key === "arrowleft") { event.preventDefault(); goBack(); }
@@ -406,6 +408,13 @@ function AppShell() {
     if (!item.executable) { openScreen("Applications"); return; }
     void run(`Launching ${item.name}`, () => item.custom ? desktopApi.launchExecutable(item.executable!) : desktopApi.launchApp(item.id, item.executable!));
   }
+
+  const paletteProjects = useMemo(() => {
+    const map = new Map<string, { name: string; path: string }>();
+    [...pinnedProjects, ...recentProjects].forEach((p) => map.set(p.path, { name: p.name, path: p.path }));
+    registeredProjects.forEach((p) => map.set(p.path, { name: p.name, path: p.path }));
+    return [...map.values()];
+  }, [pinnedProjects, recentProjects, registeredProjects]);
 
   const searchResults = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -657,6 +666,25 @@ function AppShell() {
         </div>
 
         <Onboarding open={onboarding} onComplete={completeOnboarding} onSkip={skipOnboarding} />
+        <CommandDialog open={paletteOpen} onOpenChange={setPaletteOpen}>
+          <CommandInput placeholder="Type a command or search projects, apps…" />
+          <CommandList>
+            <CommandEmpty>No results found.</CommandEmpty>
+            <CommandGroup heading="Go to">
+              {navigation.map(([label, Icon]) => <CommandItem key={label} value={`go ${label}`} onSelect={() => { openScreen(label); setPaletteOpen(false); }}><Icon size={15} /> {label}</CommandItem>)}
+            </CommandGroup>
+            {paletteProjects.length ? <CommandGroup heading="Projects">
+              {paletteProjects.map((p) => <CommandItem key={p.path} value={`project ${p.name} ${p.path}`} onSelect={() => { openProject({ path: p.path, name: p.name }); setPaletteOpen(false); }}><Folder size={15} /> {p.name}</CommandItem>)}
+            </CommandGroup> : null}
+            {installedApps.length ? <CommandGroup heading="Applications">
+              {installedApps.map((a) => <CommandItem key={a.id} value={`app ${a.name}`} onSelect={() => { openScreen("Applications"); setPaletteOpen(false); }}><AppWindow size={15} /> {a.name}</CommandItem>)}
+            </CommandGroup> : null}
+            <CommandGroup heading="Actions">
+              <CommandItem value="scan applications" onSelect={() => { setPaletteOpen(false); openScreen("Applications"); void runScan(); }}><RefreshCw size={15} /> Scan applications</CommandItem>
+              <CommandItem value="check for updates" onSelect={() => { setPaletteOpen(false); void run("Checking for updates", async () => { const info = await desktopApi.checkForUpdate(); setUpdate(info); toast.message(info.available ? `Update ${info.version} is available.` : "You are on the latest version."); }); }}><Download size={15} /> Check for updates</CommandItem>
+            </CommandGroup>
+          </CommandList>
+        </CommandDialog>
         <footer className="flex items-center gap-2 border-t border-border px-6 py-2.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Launch</span>
           {quickLaunchItems.map((item) => <Button key={item.id} variant="ghost" size="sm" title={item.executable ? `Launch ${item.name}` : "Open Applications"} onClick={() => launchQuick(item)}><AppIcon executable={item.executable ?? undefined} size={18} /> {item.name}</Button>)}
