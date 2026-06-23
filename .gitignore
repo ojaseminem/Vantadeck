@@ -19,3 +19,6 @@ Thumbs.db
 # Tauri updater signing keys — never commit the private key.
 /apps/desktop/.tauri/
 *.key
+
+# Vantadeck project metadata if the repo is imported as a project
+.vantadeck/
