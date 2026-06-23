@@ -6,7 +6,7 @@ name: Build
 
 on:
   push:
-    branches: [main, "codex/**", "claude/**"]
+    branches: [main, "release/**", "codex/**", "claude/**"]
   pull_request:
   workflow_dispatch:
 
