@@ -67,6 +67,11 @@ const sampleContinueProject: Project = {
 
 const CATEGORY_ORDER = ["game-engine", "dcc", "art", "code", "version-control", "utility"];
 
+function prettyEngine(engine: string): string {
+  if (!engine) return "Project";
+  return engine.replace(/[-_]/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 const themeSelectClass =
   "h-8 rounded-md border border-border bg-secondary px-2 text-sm text-secondary-foreground focus:outline-none focus:ring-2 focus:ring-ring";
 
@@ -105,9 +110,9 @@ function ProjectTable({ projects, actions }: { projects: Project[]; actions: Pro
             <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-primary"><Box size={18} /></span>
             <span className="flex flex-col"><strong className="font-medium">{project.name}</strong><small className="text-xs text-muted-foreground">{project.path}</small></span>
           </span>
-          <span className="text-muted-foreground">{project.lastOpened}</span>
-          <span className="flex items-center gap-1.5 text-muted-foreground"><Box size={14} /> {project.engine} {project.version}</span>
-          <span className="flex items-center gap-1.5 text-muted-foreground"><GitBranch size={13} /> {project.branch}</span>
+          <span className="text-muted-foreground">{project.lastOpened || "—"}</span>
+          <span className="flex items-center gap-1.5 text-muted-foreground"><Box size={14} /> {prettyEngine(project.engine)}{project.version ? ` ${project.version}` : ""}</span>
+          <span className="flex items-center gap-1.5 text-muted-foreground">{project.branch ? <><GitBranch size={13} /> {project.branch}</> : "—"}</span>
           <span className="flex items-center gap-1.5">
             <Button variant="outline" size="sm" onClick={() => actions.onOpen(project)}><Folder size={14} /> Open Project</Button>
             <DropdownMenu>
@@ -116,11 +121,11 @@ function ProjectTable({ projects, actions }: { projects: Project[]; actions: Pro
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem onClick={() => actions.onOpen(project)}><Folder size={14} /> Open project</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => actions.onLaunch(project)}><Rocket size={14} /> Open in {project.engine}</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => actions.onLaunch(project)}><Rocket size={14} /> Open Project in Engine</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => actions.onOpen(project)}><GitBranch size={14} /> Source control</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => actions.onOpenFolder(project)}><FolderOpen size={14} /> Open folder</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => actions.onCopyPath(project)}><Clipboard size={14} /> Copy path</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => actions.onCopyPath(project)}><Clipboard size={14} /> Copy project path</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </span>
@@ -507,7 +512,7 @@ function AppShell() {
               {continueProject ? <Card className="overflow-hidden"><CardContent className="grid gap-5 p-0 lg:grid-cols-[260px_1fr_280px]">
                 <img src={voidlineImage} alt="Voidline reactor environment" className="h-full max-h-64 w-full object-cover" />
                 <div className="space-y-3 py-5"><h1 className="text-2xl font-semibold">{continueProject.name}</h1><p className="text-sm text-muted-foreground">{continueProject.path}</p>
-                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground"><span className="flex items-center gap-1.5"><Box size={14} /> {continueProject.engine} {continueProject.version}</span><span className="flex items-center gap-1.5"><GitBranch size={13} /> {continueProject.branch}</span><span>Last opened: {continueProject.lastOpened}</span></div>
+                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground"><span className="flex items-center gap-1.5"><Box size={14} /> {prettyEngine(continueProject.engine)}{continueProject.version ? ` ${continueProject.version}` : ""}</span>{continueProject.branch ? <span className="flex items-center gap-1.5"><GitBranch size={13} /> {continueProject.branch}</span> : null}{continueProject.lastOpened ? <span>Last opened: {continueProject.lastOpened}</span> : null}</div>
                   <ul className="space-y-1.5 text-sm text-muted-foreground"><li className="flex items-center gap-2"><Folder size={14} /> Project metadata and activity stay on this machine.</li><li className="flex items-center gap-2"><FileCode2 size={14} /> Portable settings live in .vantadeck/project.toml.</li></ul>
                 </div>
                 <div className="space-y-3 border-l border-border p-5"><Button className="w-full" onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}>Open Project</Button>
@@ -543,7 +548,7 @@ function AppShell() {
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Launch</span>
           {quickLaunchItems.map((item) => <Button key={item.id} variant="ghost" size="sm" title={item.executable ? `Launch ${item.name}` : "Open Applications"} onClick={() => launchQuick(item)}><AppIcon executable={item.executable ?? undefined} size={18} /> {item.name}</Button>)}
           {quickLaunchItems.length === 0 ? <Button variant="ghost" size="sm" onClick={() => openScreen("Applications")}><Search size={18} /> Add apps to Quick Launch</Button> : null}
-          <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground"><Settings size={15} /> Theme<select aria-label="Theme" className={themeSelectClass} value={preference} onChange={(event) => setPreference(event.target.value as ThemePreference)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+          <span className="ml-auto" />
         </footer>
       </main>
     </div>

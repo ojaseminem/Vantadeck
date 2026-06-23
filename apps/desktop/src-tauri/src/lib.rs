@@ -134,14 +134,14 @@ struct DesktopChangedFile {
     status: String,
 }
 
-fn project_summary(name: String, root: &Path) -> ProjectSummary {
+fn project_summary(name: String, root: &Path, engine: String) -> ProjectSummary {
     ProjectSummary {
         name,
         path: root.display().to_string(),
-        engine: "Registered project".into(),
-        version: "Local".into(),
-        branch: "-".into(),
-        last_opened: "Registered".into(),
+        engine,
+        version: String::new(),
+        branch: String::new(),
+        last_opened: String::new(),
     }
 }
 
@@ -176,10 +176,17 @@ async fn dashboard_snapshot(state: State<'_, DesktopState>) -> Result<DesktopDas
         .registered_projects()
         .await
         .map_err(|e| e.to_string())?;
-    let summaries = projects
-        .iter()
-        .map(|p| project_summary(p.name.clone(), &p.root))
-        .collect::<Vec<_>>();
+    let mut summaries = Vec::with_capacity(projects.len());
+    for project in &projects {
+        let engine = state
+            .service
+            .project_config(&project.root)
+            .await
+            .ok()
+            .map(|config| config.project_type)
+            .unwrap_or_else(|| "project".into());
+        summaries.push(project_summary(project.name.clone(), &project.root, engine));
+    }
     let detected = apps(&state.service, &state.manifest_dir).await?;
     let health = if let Some(project) = projects.first() {
         state
