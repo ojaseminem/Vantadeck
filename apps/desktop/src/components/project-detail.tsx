@@ -11,9 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
+import { Tag, X } from "lucide-react";
 import { HealthPanel } from "./health-panel";
 import { desktopApi, isNativeRuntime, type HealthIssue } from "../bridge";
-import { loadWorkspace, newId, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
+import { loadTags, loadWorkspace, newId, saveTags, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
 
 function diffLineClass(line: string): string {
   if (line.startsWith("@@")) return "text-primary";
@@ -45,12 +46,21 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
   const diff = useQuery({ queryKey: ["git-diff", project.path, diffPath], queryFn: () => desktopApi.gitDiff(project.path, diffPath as string), enabled: native && !!diffPath, retry: false });
   const [health, setHealth] = useState<HealthIssue[]>([]);
   const [ws, setWs] = useState<ProjectWorkspace>(() => loadWorkspace(project.path));
+  const [tags, setTags] = useState<string[]>(() => loadTags(project.path));
+  const [tagInput, setTagInput] = useState("");
   const [todoText, setTodoText] = useState("");
   const [refLabel, setRefLabel] = useState("");
   const [refUrl, setRefUrl] = useState("");
   const [commit, setCommit] = useState("");
 
   useEffect(() => saveWorkspace(project.path, ws), [project.path, ws]);
+  useEffect(() => saveTags(project.path, tags), [project.path, tags]);
+
+  function addTag(value: string) {
+    const tag = value.trim().toLowerCase();
+    if (tag && !tags.includes(tag)) setTags([...tags, tag]);
+    setTagInput("");
+  }
 
   useEffect(() => {
     const paths = git.data?.changedFiles.map((file) => file.path) ?? [];
@@ -130,6 +140,16 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
             <div className="flex items-center justify-between"><h2 className="text-base font-semibold">Health</h2><Button variant="outline" size="sm" disabled={!native} onClick={() => void run("Running health checks", async () => setHealth(await desktopApi.projectHealth(project.path)))}>Run checks</Button></div>
             {health.length ? <HealthPanel projectPath={project.path} issues={health} />
               : <p className="text-sm text-muted-foreground">Run checks to validate engine versions, launch profiles, and source control. You can dismiss issues you don't care about and unhide them here later.</p>}
+          </CardContent></Card>
+          <Card className="lg:col-span-2"><CardContent className="space-y-3 p-5">
+            <h2 className="flex items-center gap-2 text-base font-semibold"><Tag size={16} /> Tags</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              {tags.map((tag) => <span key={tag} className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-1 text-xs">{tag}<button aria-label={`Remove tag ${tag}`} onClick={() => setTags(tags.filter((value) => value !== tag))} className="text-muted-foreground hover:text-foreground"><X size={12} /></button></span>)}
+              <form onSubmit={(event) => { event.preventDefault(); addTag(tagInput); }} className="flex">
+                <Input aria-label="Add tag" placeholder="Add tag…" value={tagInput} onChange={(event) => setTagInput(event.target.value)} className="h-8 w-32" />
+              </form>
+            </div>
+            <p className="text-xs text-muted-foreground">Group projects by client, game, or status. Filter by tag on the Projects screen.</p>
           </CardContent></Card>
         </TabsContent>
 

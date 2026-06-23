@@ -55,6 +55,19 @@ export function saveQuickLaunch(ids: string[]): void {
   localStorage.setItem("vantadeck.quickLaunch", JSON.stringify(ids));
 }
 
+/** User-assigned tags for a project (for grouping/filtering). */
+export function loadTags(projectPath: string): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(`vantadeck.tags:${projectPath}`) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveTags(projectPath: string, tags: string[]): void {
+  localStorage.setItem(`vantadeck.tags:${projectPath}`, JSON.stringify(tags));
+}
+
 /** Health issue codes the user has dismissed/hidden for a given project. */
 export function loadDismissedHealth(projectPath: string): string[] {
   try {

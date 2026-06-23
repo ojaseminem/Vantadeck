@@ -45,7 +45,7 @@ import { Onboarding, type OnboardingPrefs } from "./components/onboarding";
 import { PathInput } from "./components/path-input";
 import { ProjectDetail } from "./components/project-detail";
 import { HealthScreen } from "./components/health-screen";
-import { loadCustomApps, loadQuickLaunch, newId, saveCustomApps, saveQuickLaunch, type CustomApp } from "./lib/local-store";
+import { loadCustomApps, loadQuickLaunch, loadTags, newId, saveCustomApps, saveQuickLaunch, type CustomApp } from "./lib/local-store";
 import voidlineImage from "./assets/voidline-reactor.png";
 
 type UndoEntry = { label: string; undo: () => Promise<void>; redo: () => Promise<void> };
@@ -188,6 +188,7 @@ function AppShell() {
   const [customExe, setCustomExe] = useState("");
   const [customCategory, setCustomCategory] = useState("dcc");
   const [quickLaunchIds, setQuickLaunchIds] = useState<string[]>(() => loadQuickLaunch());
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [autoUpdate, setAutoUpdate] = useState(() => localStorage.getItem("vantadeck.autoUpdate") !== "false");
   const [appVersion, setAppVersion] = useState("0.2.0");
@@ -495,19 +496,35 @@ function AppShell() {
             <Button type="submit">Import project</Button>
           </div>
         </Panel></form>
-        <SectionLabel>Your projects</SectionLabel>
-        <div className="grid gap-3 sm:grid-cols-2">{registeredProjects.length ? registeredProjects.map((project) => (
-          <Card key={project.path} className="cursor-pointer transition-colors hover:border-primary/50" onClick={() => openProject({ path: project.path, name: project.name })}>
-            <CardContent className="flex items-start gap-3 p-4">
-              <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-primary"><Folder size={18} /></span>
-              <div className="min-w-0 flex-1"><h3 className="truncate font-medium">{project.name}</h3><p className="truncate text-sm text-muted-foreground">{project.path}</p>
-                <div className="mt-3 flex gap-2">
-                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openProject({ path: project.path, name: project.name }); }}>Open</Button>
-                  <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); void performUndoable(project.pinned ? "Unpinned project" : "Pinned project", async () => { await desktopApi.pinProject(project.path, !project.pinned); await invalidate.projects(); }, async () => { await desktopApi.pinProject(project.path, project.pinned); await invalidate.projects(); }); }}>{project.pinned ? "Unpin" : "Pin"}</Button>
-                </div>
-              </div>
-            </CardContent></Card>
-        )) : <EmptyState text="No projects registered yet. Import one above to get started." />}</div>
+        {(() => {
+          const allTags = [...new Set(registeredProjects.flatMap((p) => loadTags(p.path)))].sort();
+          const shown = tagFilter ? registeredProjects.filter((p) => loadTags(p.path).includes(tagFilter)) : registeredProjects;
+          return <>
+            <div className="flex items-center justify-between gap-3">
+              <SectionLabel>Your projects</SectionLabel>
+              {allTags.length ? <div className="flex flex-wrap items-center gap-1.5">
+                <button onClick={() => setTagFilter(null)} className={cn("rounded-full px-2.5 py-0.5 text-xs", !tagFilter ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground")}>All</button>
+                {allTags.map((tag) => <button key={tag} onClick={() => setTagFilter(tag)} className={cn("rounded-full px-2.5 py-0.5 text-xs", tagFilter === tag ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground")}>{tag}</button>)}
+              </div> : null}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">{shown.length ? shown.map((project) => {
+              const projectTags = loadTags(project.path);
+              return (
+                <Card key={project.path} className="cursor-pointer transition-colors hover:border-primary/50" onClick={() => openProject({ path: project.path, name: project.name })}>
+                  <CardContent className="flex items-start gap-3 p-4">
+                    <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-primary"><Folder size={18} /></span>
+                    <div className="min-w-0 flex-1"><h3 className="truncate font-medium">{project.name}</h3><p className="truncate text-sm text-muted-foreground">{project.path}</p>
+                      {projectTags.length ? <div className="mt-2 flex flex-wrap gap-1">{projectTags.map((tag) => <span key={tag} className="rounded-full bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">{tag}</span>)}</div> : null}
+                      <div className="mt-3 flex gap-2">
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); openProject({ path: project.path, name: project.name }); }}>Open</Button>
+                        <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); void performUndoable(project.pinned ? "Unpinned project" : "Pinned project", async () => { await desktopApi.pinProject(project.path, !project.pinned); await invalidate.projects(); }, async () => { await desktopApi.pinProject(project.path, project.pinned); await invalidate.projects(); }); }}>{project.pinned ? "Unpin" : "Pin"}</Button>
+                      </div>
+                    </div>
+                  </CardContent></Card>
+              );
+            }) : <EmptyState text={tagFilter ? `No projects tagged "${tagFilter}".` : "No projects registered yet. Import one above to get started."} />}</div>
+          </>;
+        })()}
       </div> : null}
 
       {activeScreen === "Applications" ? <div className="space-y-5">

@@ -148,7 +148,10 @@ impl GitProvider {
         // Unit separator (\x1f) between fields, record separator (\x1e) between commits.
         let format = "--pretty=format:%H%x1f%h%x1f%an%x1f%ad%x1f%s%x1e";
         let output = self
-            .run(root, &["log", &format!("-n{limit}"), "--date=short", format])
+            .run(
+                root,
+                &["log", &format!("-n{limit}"), "--date=short", format],
+            )
             .await?;
         let text = String::from_utf8_lossy(&output.stdout);
         Ok(text
