@@ -41,3 +41,16 @@ export function saveCustomApps(apps: CustomApp[]): void {
 export function newId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
+
+/** App ids the user has pinned to the Quick Launch bar. */
+export function loadQuickLaunch(): string[] {
+  try {
+    return JSON.parse(localStorage.getItem("vantadeck.quickLaunch") ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveQuickLaunch(ids: string[]): void {
+  localStorage.setItem("vantadeck.quickLaunch", JSON.stringify(ids));
+}

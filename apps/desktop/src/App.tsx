@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Star,
   Wrench,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -38,7 +39,7 @@ import { type ThemePreference, useTheme } from "./theme";
 import { Onboarding, type OnboardingPrefs } from "./components/onboarding";
 import { PathInput } from "./components/path-input";
 import { ProjectDetail } from "./components/project-detail";
-import { loadCustomApps, newId, saveCustomApps, type CustomApp } from "./lib/local-store";
+import { loadCustomApps, loadQuickLaunch, newId, saveCustomApps, saveQuickLaunch, type CustomApp } from "./lib/local-store";
 import voidlineImage from "./assets/voidline-reactor.png";
 
 type UndoEntry = { label: string; undo: () => Promise<void>; redo: () => Promise<void> };
@@ -170,6 +171,7 @@ function AppShell() {
   const [customName, setCustomName] = useState("");
   const [customExe, setCustomExe] = useState("");
   const [customCategory, setCustomCategory] = useState("dcc");
+  const [quickLaunchIds, setQuickLaunchIds] = useState<string[]>(() => loadQuickLaunch());
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [scanning, setScanning] = useState(false);
   const [onboarding, setOnboarding] = useState(false);
@@ -296,9 +298,31 @@ function AppShell() {
     saveCustomApps(next);
   }
 
-  function launchInstalled(app: { id: string; name: string; executable?: string | null }) {
-    if (app.executable) void run(`Launching ${app.name}`, () => desktopApi.launchApp(app.id, app.executable!));
-    else openScreen("Applications");
+  function toggleQuickLaunch(id: string) {
+    const next = quickLaunchIds.includes(id) ? quickLaunchIds.filter((value) => value !== id) : [...quickLaunchIds, id];
+    setQuickLaunchIds(next);
+    saveQuickLaunch(next);
+  }
+
+  // Resolve pinned Quick Launch apps to launchable items; fall back to the first
+  // few detected apps when the user hasn't pinned anything yet.
+  const quickLaunchItems = useMemo(() => {
+    const resolve = (id: string) => {
+      const detected = installedApps.find((app) => app.id === id);
+      if (detected) return { id, name: detected.name, executable: detected.executable ?? null, custom: false };
+      const custom = customApps.find((app) => app.id === id);
+      if (custom) return { id, name: custom.name, executable: custom.executable, custom: true };
+      return null;
+    };
+    if (quickLaunchIds.length) {
+      return quickLaunchIds.map(resolve).filter((item): item is { id: string; name: string; executable: string | null; custom: boolean } => item !== null);
+    }
+    return installedApps.slice(0, 6).map((app) => ({ id: app.id, name: app.name, executable: app.executable ?? null, custom: false }));
+  }, [quickLaunchIds, installedApps, customApps]);
+
+  function launchQuick(item: { id: string; name: string; executable: string | null; custom: boolean }) {
+    if (!item.executable) { openScreen("Applications"); return; }
+    void run(`Launching ${item.name}`, () => item.custom ? desktopApi.launchExecutable(item.executable!) : desktopApi.launchApp(item.id, item.executable!));
   }
 
   async function submitImport(event: FormEvent) {
@@ -358,7 +382,7 @@ function AppShell() {
                 <Card key={app.id}><CardContent className="flex items-start gap-3 p-4">
                   <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary"><AppIcon executable={iconInstall?.executable} size={26} /></span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3>{launchTarget ? <Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name} ${formatVersion(launchTarget.version)}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchApp(app.id, launchTarget.executable)); }}>Launch</Button> : null}</div>
+                    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3>{launchTarget ? <span className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={quickLaunchIds.includes(app.id) ? `Remove ${app.name} from Quick Launch` : `Add ${app.name} to Quick Launch`} onClick={() => toggleQuickLaunch(app.id)}><Star size={15} className={quickLaunchIds.includes(app.id) ? "fill-primary text-primary" : "text-muted-foreground"} /></Button><Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name} ${formatVersion(launchTarget.version)}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchApp(app.id, launchTarget.executable)); }}>Launch</Button></span> : null}</div>
                     <div className="mt-1.5 flex flex-wrap gap-1">{app.installations.map((item) => <Badge key={item.executable} variant={item.runnable ? "secondary" : "outline"} className={item.runnable ? "" : "text-muted-foreground line-through"}>{formatVersion(item.version)}</Badge>)}</div>
                     {!app.launchable ? <p className="mt-1.5 text-xs text-primary">Detected — used for project version control</p> : null}
                     {app.launchable && hasIncompatible ? <p className="mt-1.5 text-xs text-muted-foreground">Some versions are built for another architecture and are skipped on launch.</p> : null}
@@ -374,7 +398,7 @@ function AppShell() {
             <Card key={app.id}><CardContent className="flex items-start gap-3 p-4">
               <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary"><AppIcon executable={app.executable} size={26} /></span>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3><Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchExecutable(app.executable)); }}>Launch</Button></div>
+                <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3><span className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={quickLaunchIds.includes(app.id) ? `Remove ${app.name} from Quick Launch` : `Add ${app.name} to Quick Launch`} onClick={() => toggleQuickLaunch(app.id)}><Star size={15} className={quickLaunchIds.includes(app.id) ? "fill-primary text-primary" : "text-muted-foreground"} /></Button><Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchExecutable(app.executable)); }}>Launch</Button></span></div>
                 <p className="mt-1 truncate text-xs text-muted-foreground">{app.executable}</p>
                 <Button variant="ghost" size="sm" className="mt-1 h-auto p-0 text-muted-foreground" onClick={() => removeCustomApp(app.id)}>Remove</Button>
               </div>
@@ -505,8 +529,8 @@ function AppShell() {
         <Onboarding open={onboarding} onComplete={completeOnboarding} onSkip={skipOnboarding} />
         <footer className="flex items-center gap-2 border-t border-border px-6 py-2.5">
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quick Launch</span>
-          {installedApps.slice(0, 6).map((app) => <Button key={app.id} variant="ghost" size="sm" title={app.executable ? `Launch ${app.name}` : "Open Applications"} onClick={() => launchInstalled(app)}><AppIcon executable={app.executable ?? undefined} size={18} /> {app.name}</Button>)}
-          {installedApps.length === 0 ? <Button variant="ghost" size="sm" onClick={() => openScreen("Applications")}><Search size={18} /> Detect applications</Button> : null}
+          {quickLaunchItems.map((item) => <Button key={item.id} variant="ghost" size="sm" title={item.executable ? `Launch ${item.name}` : "Open Applications"} onClick={() => launchQuick(item)}><AppIcon executable={item.executable ?? undefined} size={18} /> {item.name}</Button>)}
+          {quickLaunchItems.length === 0 ? <Button variant="ghost" size="sm" onClick={() => openScreen("Applications")}><Search size={18} /> Add apps to Quick Launch</Button> : null}
           <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground"><Settings size={15} /> Theme<select aria-label="Theme" className={themeSelectClass} value={preference} onChange={(event) => setPreference(event.target.value as ThemePreference)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
         </footer>
       </main>
