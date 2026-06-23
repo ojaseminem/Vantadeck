@@ -54,3 +54,16 @@ export function loadQuickLaunch(): string[] {
 export function saveQuickLaunch(ids: string[]): void {
   localStorage.setItem("vantadeck.quickLaunch", JSON.stringify(ids));
 }
+
+/** Health issue codes the user has dismissed/hidden for a given project. */
+export function loadDismissedHealth(projectPath: string): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(`vantadeck.health.dismissed:${projectPath}`) ?? "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveDismissedHealth(projectPath: string, codes: string[]): void {
+  localStorage.setItem(`vantadeck.health.dismissed:${projectPath}`, JSON.stringify(codes));
+}

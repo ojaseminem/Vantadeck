@@ -43,6 +43,7 @@ import { type ThemePreference, useTheme } from "./theme";
 import { Onboarding, type OnboardingPrefs } from "./components/onboarding";
 import { PathInput } from "./components/path-input";
 import { ProjectDetail } from "./components/project-detail";
+import { HealthScreen } from "./components/health-screen";
 import { loadCustomApps, loadQuickLaunch, newId, saveCustomApps, saveQuickLaunch, type CustomApp } from "./lib/local-store";
 import voidlineImage from "./assets/voidline-reactor.png";
 
@@ -171,7 +172,7 @@ function AppShell() {
     isDemoMode() ? defaultApps.map((app) => ({ id: app.name.toLowerCase().replaceAll(" ", "-"), ...app })) : [],
   );
   const [health, setHealth] = useState<HealthIssue[]>([]);
-  const projectsQuery = useProjects(activeScreen === "Projects");
+  const projectsQuery = useProjects(activeScreen === "Projects" || activeScreen === "Health");
   const appsQuery = useApps(activeScreen === "Applications");
   const toolsQuery = useTools(activeScreen === "Tools");
   const registeredProjects = projectsQuery.data ?? [];
@@ -517,17 +518,6 @@ function AppShell() {
         </details>
       </div> : null}
 
-      {activeScreen === "Health" ? <div className="space-y-4">
-        <Panel title="Run project diagnostics">
-          <div className="flex flex-wrap items-start gap-2"><PathInput ariaLabel="Health project path" directory placeholder="Project root" value={rootInput} onChange={setRootInput} /><Button onClick={() => void run("Running health checks", async () => setHealth(await desktopApi.projectHealth(rootInput)))}>Run checks</Button></div>
-        </Panel>
-        <div className="grid gap-3 sm:grid-cols-2">{health.length ? health.map((issue) => (
-          <Card key={issue.code} className={cn("border-l-4", issue.severity === "error" ? "border-l-destructive" : "border-l-primary")}><CardContent className="flex items-start gap-3 p-4">
-            <CircleAlert className={issue.severity === "error" ? "text-destructive" : "text-primary"} />
-            <div><h3 className="font-medium">{issue.title}</h3><p className="text-sm text-muted-foreground">{issue.detail}</p><small className="text-xs text-muted-foreground">{issue.code}</small></div>
-          </CardContent></Card>
-        )) : <EmptyState text="No health issues reported. Run checks for a registered project." />}</div>
-      </div> : null}
 
       {activeScreen === "Tools" ? <div className="space-y-4">
         <Panel title="Curated Tools Hub" description="Vantadeck shows validated, locally cached community metadata. It never executes downloaded installers or scripts automatically.">
@@ -636,7 +626,7 @@ function AppShell() {
                 <Card><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-sm font-semibold">Installed Apps <Button variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => openScreen("Applications")}>Manage</Button></div><div className="space-y-1">{installedApps.length ? installedApps.map((app) => <button key={app.name} onClick={() => openScreen("Applications")} title={`Manage ${app.name} versions`} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted/50"><span className="flex h-8 w-8 items-center justify-center rounded-md bg-secondary"><AppIcon executable={app.executable ?? undefined} size={18} /></span><span className="min-w-0 flex-1"><strong className="block truncate">{app.name}</strong><small className="block truncate text-xs text-muted-foreground">{[...new Set(app.versions.map(formatVersion))].join(", ")}</small></span><ChevronRight size={15} className="text-muted-foreground" /></button>) : <EmptyState text="No apps detected yet." />}</div></CardContent></Card>
               </aside>
             </section>
-          </div> : activeScreen === "Project" && selectedProject ? <ProjectDetail project={selectedProject} onBack={() => openScreen("Projects")} /> : managementContent}
+          </div> : activeScreen === "Project" && selectedProject ? <ProjectDetail project={selectedProject} onBack={() => openScreen("Projects")} /> : activeScreen === "Health" ? <HealthScreen projects={registeredProjects} onOpenProject={openProject} /> : managementContent}
         </div>
 
         <Onboarding open={onboarding} onComplete={completeOnboarding} onSkip={skipOnboarding} />

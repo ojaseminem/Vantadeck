@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Box, CircleAlert, ExternalLink, FileCode2, FolderOpen, GitBranch,
-  ListTodo, Notebook, Play, Plus, RefreshCw, Rocket, Trash2,
+  ArrowLeft, Box, Download, ExternalLink, FileCode2, FolderOpen, GitBranch, GitCommitHorizontal,
+  ListTodo, Notebook, Play, Plus, RefreshCw, Rocket, Trash2, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { HealthPanel } from "./health-panel";
 import { desktopApi, isNativeRuntime, type HealthIssue } from "../bridge";
 import { loadWorkspace, newId, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
 
@@ -79,34 +80,50 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
           </CardContent></Card>
           <Card><CardContent className="space-y-3 p-5">
             <div className="flex items-center justify-between"><h2 className="text-base font-semibold">Health</h2><Button variant="outline" size="sm" disabled={!native} onClick={() => void run("Running health checks", async () => setHealth(await desktopApi.projectHealth(project.path)))}>Run checks</Button></div>
-            {health.length ? <div className="space-y-2">{health.map((issue) => <div key={issue.code} className="flex items-start gap-2 text-sm"><CircleAlert size={16} className={issue.severity === "error" ? "shrink-0 text-destructive" : "shrink-0 text-primary"} /><span className="min-w-0"><strong className="block truncate">{issue.title}</strong><small className="line-clamp-2 text-muted-foreground">{issue.detail}</small></span></div>)}</div>
-              : <p className="text-sm text-muted-foreground">Run checks to validate engine versions, launch profiles, and source control.</p>}
+            {health.length ? <HealthPanel projectPath={project.path} issues={health} />
+              : <p className="text-sm text-muted-foreground">Run checks to validate engine versions, launch profiles, and source control. You can dismiss issues you don't care about and unhide them here later.</p>}
           </CardContent></Card>
         </TabsContent>
 
-        <TabsContent value="source" className="mt-4 space-y-4">
-          <Card><CardContent className="space-y-3 p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-base font-semibold"><GitBranch size={17} /> {git.data?.branch ? `On ${git.data.branch}` : "Version control"}</h2>
-              <Button variant="ghost" size="sm" disabled={!native} onClick={() => void refreshGit()}><RefreshCw size={14} /> Refresh</Button>
+        <TabsContent value="source" className="mt-4">
+          {git.isError ? (
+            <Card><CardContent className="p-6"><p className="text-sm text-muted-foreground">This folder isn't a Git repository (or Git isn't available). Initialize one from your engine or a terminal to track changes here.</p></CardContent></Card>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+              <Card><CardContent className="p-0">
+                <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+                  <span className="flex min-w-0 items-center gap-2 text-sm font-semibold"><GitBranch size={15} className="shrink-0" /><span className="truncate">{git.data?.branch ?? "—"}</span></span>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button variant="ghost" size="sm" disabled={!native} onClick={() => { if (window.confirm(`Pull changes into ${project.name}?`)) void run("Pulling", async () => { await desktopApi.gitSync(project.path, true); await refreshGit(); }); }}><Download size={14} /> Pull</Button>
+                    <Button variant="ghost" size="sm" disabled={!native} onClick={() => { if (window.confirm(`Push ${project.name} to its remote?`)) void run("Pushing", () => desktopApi.gitPush(project.path, true)); }}><Upload size={14} /> Push</Button>
+                    <Button variant="ghost" size="icon" disabled={!native} aria-label="Refresh status" onClick={() => void refreshGit()}><RefreshCw size={14} /></Button>
+                  </div>
+                </div>
+                <div className="px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{git.data ? `${git.data.changedFiles.length} changed file${git.data.changedFiles.length === 1 ? "" : "s"}` : "Reading status…"}</div>
+                <div className="max-h-[380px] overflow-y-auto">
+                  {git.data && git.data.changedFiles.length ? git.data.changedFiles.map((file) => (
+                    <div key={file.path} className="flex items-center gap-2 border-t border-border px-4 py-1.5 text-sm">
+                      <FileCode2 size={14} className="shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>
+                      <Badge variant="outline" className="shrink-0 text-[10px] uppercase">{file.status}</Badge>
+                    </div>
+                  )) : <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">No local changes — working tree clean.</div>}
+                </div>
+              </CardContent></Card>
+              <div className="space-y-4">
+                <Card><CardContent className="space-y-2 p-4">
+                  <h3 className="text-sm font-semibold">Commit</h3>
+                  <Input aria-label="Commit message" placeholder={`Summary of changes`} value={commit} onChange={(e) => setCommit(e.target.value)} />
+                  <Button className="w-full" disabled={!native || !commit.trim() || !(git.data && git.data.changedFiles.length)} onClick={() => { if (window.confirm(`Commit all changes in ${project.name}?`)) void run("Committing", async () => { await desktopApi.gitCommit(project.path, commit, true); setCommit(""); await refreshGit(); }); }}><GitCommitHorizontal size={15} /> Commit to {git.data?.branch ?? "branch"}</Button>
+                  <p className="text-xs text-muted-foreground">Stages all changes and commits. Push when you're ready to share.</p>
+                </CardContent></Card>
+                <Card><CardContent className="space-y-2 p-4">
+                  <h3 className="text-sm font-semibold">Switch branch</h3>
+                  <div className="flex gap-2"><Input aria-label="Branch" placeholder="branch name" value={branch} onChange={(e) => setBranch(e.target.value)} className="flex-1" /><Button variant="outline" disabled={!native || !branch} onClick={() => { if (window.confirm(`Switch ${project.name} to ${branch}?`)) void run("Switching branch", async () => { await desktopApi.gitSwitch(project.path, branch, true); await refreshGit(); }); }}>Switch</Button></div>
+                </CardContent></Card>
+              </div>
             </div>
-            {git.isError ? <p className="text-sm text-muted-foreground">This project is not a Git repository (or Git is unavailable).</p> : (
-              <>
-                <p className="text-sm text-muted-foreground">{git.data ? `${git.data.changedFiles.length} changed file(s).` : "Reading status…"}</p>
-                {git.data?.changedFiles.length ? <div className="max-h-40 overflow-y-auto rounded-lg border border-border text-sm">{git.data.changedFiles.slice(0, 50).map((file) => <div key={file.path} className="flex items-center justify-between border-b border-border px-3 py-1.5 last:border-0"><span className="truncate">{file.path}</span><Badge variant="outline">{file.status}</Badge></div>)}</div> : null}
-                <div className="flex flex-wrap gap-2">
-                  <Input aria-label="Branch" placeholder="branch" value={branch} onChange={(e) => setBranch(e.target.value)} className="w-40" />
-                  <Button variant="outline" disabled={!native || !branch} onClick={() => { if (window.confirm(`Switch ${project.name} to ${branch}?`)) void run("Switching branch", async () => { await desktopApi.gitSwitch(project.path, branch, true); await refreshGit(); }); }}>Switch</Button>
-                  <Button variant="outline" disabled={!native} onClick={() => { if (window.confirm(`Pull changes into ${project.name}?`)) void run("Syncing", async () => { await desktopApi.gitSync(project.path, true); await refreshGit(); }); }}>Sync</Button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Input aria-label="Commit message" placeholder="Commit message" value={commit} onChange={(e) => setCommit(e.target.value)} className="flex-1 min-w-48" />
-                  <Button variant="outline" disabled={!native || !commit} onClick={() => { if (window.confirm(`Commit all changes in ${project.name}?`)) void run("Committing", async () => { await desktopApi.gitCommit(project.path, commit, true); setCommit(""); await refreshGit(); }); }}>Commit</Button>
-                  <Button variant="outline" disabled={!native} onClick={() => { if (window.confirm(`Push ${project.name} to its remote?`)) void run("Pushing", () => desktopApi.gitPush(project.path, true)); }}>Push</Button>
-                </div>
-              </>
-            )}
-          </CardContent></Card>
+          )}
         </TabsContent>
 
         <TabsContent value="notes" className="mt-4 grid gap-4 lg:grid-cols-2">
