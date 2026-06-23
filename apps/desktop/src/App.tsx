@@ -195,6 +195,7 @@ function AppShell() {
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
   const [onboarding, setOnboarding] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [selectedProject, setSelectedProject] = useState<{ path: string; name: string } | null>(null);
   const undoStack = useRef<UndoEntry[]>([]);
   const redoStack = useRef<UndoEntry[]>([]);
@@ -352,6 +353,30 @@ function AppShell() {
   function openProject(target: { path: string; name: string }) {
     navigate("Project", target);
   }
+
+  async function importDroppedFolder(path: string) {
+    const info = await desktopApi.pathInfo(path).catch(() => null);
+    if (!info?.isDir) { toast.error("Drop a project folder to import."); return; }
+    const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+    if (!window.confirm(`Import "${name}" as a Vantadeck project?`)) return;
+    await run(`Importing ${name}`, async () => { await desktopApi.importProject(path, name); await invalidate.projects(); });
+    openProject({ path, name });
+  }
+
+  useEffect(() => {
+    if (!isNativeRuntime()) return;
+    let unlisten: (() => void) | undefined;
+    void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
+      getCurrentWebview().onDragDropEvent((event) => {
+        const payload = event.payload as { type: string; paths?: string[] };
+        if (payload.type === "over" || payload.type === "enter") setDragOver(true);
+        else if (payload.type === "leave") setDragOver(false);
+        else if (payload.type === "drop") { setDragOver(false); const first = payload.paths?.[0]; if (first) void importDroppedFolder(first); }
+      }).then((fn) => { unlisten = fn; }),
+    ).catch(() => undefined);
+    return () => unlisten?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function applyCustomApps(apps: CustomApp[]) {
     setCustomApps(apps);
@@ -584,6 +609,7 @@ function AppShell() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      {dragOver ? <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm"><div className="rounded-2xl border-2 border-dashed border-primary px-10 py-8 text-center"><Folder size={36} className="mx-auto mb-2 text-primary" /><p className="text-lg font-semibold">Drop a folder to import it as a project</p></div></div> : null}
       <aside className="flex w-64 flex-none flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
         <div className="px-2 py-1"><strong className="block text-lg font-bold tracking-tight text-primary">VANTADECK</strong><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Local-first creative launcher</span></div>
         <nav aria-label="Primary navigation" className="flex flex-col gap-1">
