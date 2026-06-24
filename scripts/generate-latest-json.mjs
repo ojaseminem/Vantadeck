@@ -69,7 +69,7 @@ if (Object.keys(platforms).length === 0) {
 
 const feed = {
   version,
-  notes: `Vantadeck ${rawTag}. See the release notes for details.`,
+  notes: `Pipeline OS ${rawTag}. See the release notes for details.`,
   pub_date: new Date().toISOString(),
   platforms,
 };
