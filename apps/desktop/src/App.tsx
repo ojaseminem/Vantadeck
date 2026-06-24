@@ -41,7 +41,7 @@ import { Input } from "@/components/ui/input";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { installedApps as defaultApps, pinnedProjects as defaultPinned, recentProjects as defaultRecent, type Project } from "./data";
-import { APP_CATEGORY_LABELS, browsePath, desktopApi, formatVersion, isDemoMode, isNativeRuntime, loadDashboard, onScanProgress, openExternal, type EngineVersionOption, type HealthSummary, type RecentFile, type ScanProgress, type ToolManifest, type UpdateInfo } from "./bridge";
+import { APP_CATEGORY_LABELS, browsePath, desktopApi, formatVersion, isDemoMode, isNativeRuntime, loadDashboard, onScanProgress, openExternal, type EngineVersionOption, type HealthSummary, type ProjectHealthOverview, type RecentFile, type ScanProgress, type ToolManifest, type UpdateInfo } from "./bridge";
 import { formatLastOpened, timeAgo } from "./lib/format";
 import { ProjectThumb } from "./components/thumbnail";
 import { Progress } from "@/components/ui/progress";
@@ -177,7 +177,12 @@ function AppShell() {
   const [installedApps, setInstalledApps] = useState<Array<{ id: string; name: string; executable?: string | null; versions: string[] }>>(
     isDemoMode() ? defaultApps.map((app) => ({ id: app.name.toLowerCase().replaceAll(" ", "-"), ...app })) : [],
   );
-  const [health, setHealth] = useState<HealthSummary[]>([]);
+  const [healthProjects, setHealthProjects] = useState<ProjectHealthOverview[]>([]);
+  // Flattened issues across projects (for the continue-card summary and search).
+  const health = useMemo<HealthSummary[]>(
+    () => healthProjects.flatMap((project) => project.issues.map((issue) => ({ code: issue.code, title: issue.title, detail: issue.detail, severity: issue.severity, project: project.name }))),
+    [healthProjects],
+  );
   const projectsQuery = useProjects(activeScreen === "Projects" || activeScreen === "Health");
   const appsQuery = useApps(activeScreen === "Applications");
   const toolsQuery = useTools(activeScreen === "Tools");
@@ -226,8 +231,14 @@ function AppShell() {
       setPinnedProjects(snapshot.pinnedProjects);
       setRecentProjects(snapshot.recentProjects);
       setInstalledApps(snapshot.apps);
-      setHealth(snapshot.health); // cached health, shown instantly
     });
+  }, []);
+
+  // Per-project health for the home rollup. Loads the cached result instantly so
+  // it survives reopening, independent of any in-progress rescan.
+  const loadHealth = useCallback(() => {
+    if (!isNativeRuntime()) return;
+    desktopApi.healthOverview().then(setHealthProjects).catch(() => undefined);
   }, []);
 
   useEffect(() => { reloadDashboard(); }, [reloadDashboard]);
@@ -240,23 +251,24 @@ function AppShell() {
     return () => { active = false; };
   }, [continueProject]);
 
-  // Health refresh strategy (low overhead): a full scan once on launch, and a
-  // lightweight refresh whenever the window regains focus (debounced). The
-  // initial paint already shows the cached result from the snapshot.
+  // Health refresh strategy (low overhead): show cached instantly, run a full
+  // scan once on launch, and a lightweight refresh when the window regains focus
+  // (debounced). Each scan updates the cache, then we re-read the per-project view.
   const lastHealthRefresh = useRef(0);
   useEffect(() => {
+    loadHealth(); // cached, instant
     if (!isNativeRuntime()) return;
     const refresh = (full: boolean) => {
       const now = Date.now();
       if (!full && now - lastHealthRefresh.current < 20000) return; // debounce focus
       lastHealthRefresh.current = now;
-      desktopApi.refreshHealth(full).then(setHealth).catch(() => undefined);
+      desktopApi.refreshHealth(full).then(() => loadHealth()).catch(() => undefined);
     };
     refresh(true); // actual scan on launch
     const onFocus = () => refresh(false);
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, []);
+  }, [loadHealth]);
 
   useEffect(() => {
     if (!isNativeRuntime()) return;
@@ -847,7 +859,12 @@ function AppShell() {
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
-                  <div><h2 className="mb-2 text-sm font-semibold">Health summary</h2>{health.length ? <div className="space-y-2">{health.slice(0, 3).map((issue, index) => <div key={`${issue.project}-${issue.code}-${index}`} className="flex items-start gap-2 text-sm"><CircleAlert className={cn("shrink-0", issue.severity === "error" ? "text-destructive" : "text-primary")} size={16} /><span className="min-w-0" title={issue.detail}><strong className="block truncate">{issue.title}</strong><small className="line-clamp-2 text-muted-foreground">{issue.project ? `${issue.project} — ` : ""}{issue.detail}</small></span></div>)}</div> : <EmptyState text="No current health issues." />}</div>
+                  <div><h2 className="mb-2 text-sm font-semibold">Health summary</h2>{(() => {
+                    const ph = healthProjects.find((entry) => entry.path === continueProject.path);
+                    if (!ph || !ph.checkedAt) return <p className="text-sm text-muted-foreground">Checking project health…</p>;
+                    if (!ph.issues.length) return <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><CircleAlert size={15} className="text-primary" /> No issues — looks healthy.</p>;
+                    return <div className="space-y-2">{ph.issues.slice(0, 3).map((issue, index) => <div key={`${issue.code}-${index}`} className="flex items-start gap-2 text-sm"><CircleAlert className={cn("shrink-0", issue.severity === "error" ? "text-destructive" : "text-primary")} size={16} /><span className="min-w-0" title={issue.detail}><strong className="block truncate">{issue.title}</strong><small className="line-clamp-2 text-muted-foreground">{issue.detail}</small></span></div>)}</div>;
+                  })()}</div>
                 </div>
               </CardContent></Card> : <Card><CardContent className="p-6"><EmptyState text="Import a project to start working locally." /></CardContent></Card>}
             </section>
@@ -867,7 +884,17 @@ function AppShell() {
                 <Button variant="link" className="px-0" onClick={() => openScreen("Projects")}>View all projects <ChevronRight size={16} /></Button>
               </div>
               <aside className="space-y-4">
-                <Card><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-sm font-semibold">Project Health <Button variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => openScreen("Health")}>View All ({health.length})</Button></div>{health.length ? <div className="space-y-2">{health.slice(0, 3).map((issue, index) => <div key={`${issue.project}-${issue.code}-${index}`} className="flex items-start gap-2 text-sm"><CircleAlert className={cn("shrink-0", issue.severity === "error" ? "text-destructive" : "text-primary")} size={16} /><span className="min-w-0" title={issue.detail}><strong className="block truncate">{issue.title}</strong><small className="line-clamp-2 text-muted-foreground">{issue.project ? `${issue.project} — ` : ""}{issue.detail}</small></span></div>)}</div> : <EmptyState text="No current health issues." />}</CardContent></Card>
+                <Card><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-sm font-semibold">Project Health <Button variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => openScreen("Health")}>View All</Button></div>{healthProjects.length ? <div className="space-y-0.5">{healthProjects.slice(0, 6).map((entry) => {
+                  const errors = entry.issues.filter((issue) => issue.severity === "error").length;
+                  const warnings = entry.issues.length - errors;
+                  return <button key={entry.path} onClick={() => openProject({ path: entry.path, name: entry.name })} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-muted/50">
+                    <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                    {!entry.checkedAt ? <span className="shrink-0 text-xs text-muted-foreground">…</span>
+                      : errors ? <Badge variant="outline" className="shrink-0 border-destructive/50 text-destructive">{errors} error{errors > 1 ? "s" : ""}</Badge>
+                      : warnings ? <Badge variant="outline" className="shrink-0">{warnings} warning{warnings > 1 ? "s" : ""}</Badge>
+                      : <Badge variant="secondary" className="shrink-0 text-primary">Healthy</Badge>}
+                  </button>;
+                })}</div> : <EmptyState text="No projects to check yet." />}</CardContent></Card>
                 <Card><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-sm font-semibold">Installed Apps <Button variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => openScreen("Applications")}>Manage</Button></div><div className="space-y-1">{installedApps.length ? installedApps.map((app) => <button key={app.name} onClick={() => openScreen("Applications")} title={`Manage ${app.name} versions`} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted/50"><span className="flex h-8 w-8 items-center justify-center rounded-md bg-secondary"><AppIcon executable={app.executable ?? undefined} size={18} /></span><span className="min-w-0 flex-1"><strong className="block truncate">{app.name}</strong><small className="block truncate text-xs text-muted-foreground">{[...new Set(app.versions.map(formatVersion))].join(", ")}</small></span><ChevronRight size={15} className="text-muted-foreground" /></button>) : <EmptyState text="No apps detected yet." />}</div></CardContent></Card>
               </aside>
             </section>

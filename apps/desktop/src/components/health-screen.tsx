@@ -14,11 +14,13 @@ export function HealthScreen({ projects, onOpenProject }: { projects: Registered
   const [expanded, setExpanded] = useState<string | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
 
-  // Pre-populate from cached health so the screen is never blank on open.
+  // Pre-populate from cached health so the screen is never blank on open, then
+  // scan any project that has no cached result yet (so first open populates and
+  // caches without the user having to press Re-check).
   useEffect(() => {
     if (!isNativeRuntime()) return;
     let active = true;
-    desktopApi.healthOverview().then((overview) => {
+    desktopApi.healthOverview().then(async (overview) => {
       if (!active) return;
       const cachedResults: Record<string, HealthIssue[]> = {};
       const cachedAt: Record<string, string> = {};
@@ -27,6 +29,9 @@ export function HealthScreen({ projects, onOpenProject }: { projects: Registered
       }
       setResults(cachedResults);
       setCheckedAt(cachedAt);
+      for (const entry of overview) {
+        if (active && !entry.checkedAt) await runOne(entry.path, false);
+      }
     }).catch(() => undefined);
     return () => { active = false; };
   }, []);
