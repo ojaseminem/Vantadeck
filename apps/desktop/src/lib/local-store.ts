@@ -55,6 +55,31 @@ export function saveQuickLaunch(ids: string[]): void {
   localStorage.setItem("vantadeck.quickLaunch", JSON.stringify(ids));
 }
 
+/** Custom thumbnail image path for a project (empty = use default). */
+export function loadThumbnail(projectPath: string): string {
+  return localStorage.getItem(`vantadeck.thumb:${projectPath}`) ?? "";
+}
+
+export function saveThumbnail(projectPath: string, imagePath: string): void {
+  if (imagePath) localStorage.setItem(`vantadeck.thumb:${projectPath}`, imagePath);
+  else localStorage.removeItem(`vantadeck.thumb:${projectPath}`);
+}
+
+export type ToolSource = { id: string; type: "local" | "git"; value: string };
+
+/** User-configured extra tool sources (local folders or git repo URLs). */
+export function loadToolSources(): ToolSource[] {
+  try {
+    return JSON.parse(localStorage.getItem("vantadeck.toolSources") ?? "[]") as ToolSource[];
+  } catch {
+    return [];
+  }
+}
+
+export function saveToolSources(sources: ToolSource[]): void {
+  localStorage.setItem("vantadeck.toolSources", JSON.stringify(sources));
+}
+
 /** User-assigned tags for a project (for grouping/filtering). */
 export function loadTags(projectPath: string): string[] {
   try {

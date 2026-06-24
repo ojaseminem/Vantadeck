@@ -57,7 +57,7 @@ describe("dashboard projects", () => {
     render(<App />);
     await userEvent.click(screen.getByRole("button", { name: /Tools/ }));
 
-    expect(screen.getByRole("heading", { name: "Curated Tools Hub" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tool sources" })).toBeInTheDocument();
     expect(screen.getByText(/never executes downloaded installers/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Local Git inspector" })).not.toBeInTheDocument();
   });

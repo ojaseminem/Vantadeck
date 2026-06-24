@@ -37,7 +37,7 @@ export function Onboarding({ open, onComplete, onSkip }: { open: boolean; onComp
   const toggleInterest = (id: string) =>
     setInterests((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]));
 
-  const titles = ["Welcome to Vantadeck", "What do you work with?", "Where should we look?"];
+  const titles = ["Welcome to PipelineOS", "What do you work with?", "Where should we look?"];
   const descriptions = [
     "Your local-first launcher for projects, engines, and creative tools. A couple of quick questions to tailor it to you.",
     "Pick what you use most — we'll prioritize these in your library and quick launch.",

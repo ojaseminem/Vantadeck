@@ -800,6 +800,59 @@ async fn recent_files(root: String, limit: usize) -> Result<Vec<RecentFile>, Str
     Ok(files)
 }
 
+/// Reads an image file as a data URL (for custom project thumbnails).
+#[tauri::command(rename_all = "camelCase")]
+async fn read_image(path: String) -> Result<Option<String>, String> {
+    let file = PathBuf::from(&path);
+    if !file.is_file() {
+        return Ok(None);
+    }
+    let mime = match file.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase).as_deref() {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        _ => "image/png",
+    };
+    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(&file).ok())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(bytes) = bytes else { return Ok(None) };
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err("Image is too large (max 16 MB).".into());
+    }
+    use base64::Engine;
+    Ok(Some(format!(
+        "data:{};base64,{}",
+        mime,
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )))
+}
+
+/// Reads and validates tool manifests from a local folder (a user tool source).
+#[tauri::command(rename_all = "camelCase")]
+async fn read_tools_from_dir(path: String) -> Result<Vec<ToolManifest>, String> {
+    let dir = PathBuf::from(path);
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut tools = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let file = entry.path();
+            if file.extension().and_then(|value| value.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(text) = std::fs::read_to_string(&file)
+                && let Ok(tool) = ToolManifest::from_json(&text)
+            {
+                tools.push(tool);
+            }
+        }
+    }
+    Ok(tools)
+}
+
 fn open_with_os(path: &str) -> std::io::Result<()> {
     #[cfg(windows)]
     {
@@ -894,6 +947,8 @@ pub fn run() {
             path_info,
             project_config,
             recent_files,
+            read_image,
+            read_tools_from_dir,
             open_path,
             launch_executable,
             git_sync,

@@ -11,10 +11,10 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
-import { Tag, X } from "lucide-react";
+import { Copy, ImageIcon, Link2, Tag, X } from "lucide-react";
 import { HealthPanel } from "./health-panel";
-import { desktopApi, isNativeRuntime, type HealthIssue } from "../bridge";
-import { loadTags, loadWorkspace, newId, saveTags, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
+import { browsePath, desktopApi, isNativeRuntime, type HealthIssue } from "../bridge";
+import { loadTags, loadThumbnail, loadWorkspace, newId, saveTags, saveThumbnail, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
 
 function diffLineClass(line: string): string {
   if (line.startsWith("@@")) return "text-primary";
@@ -46,6 +46,8 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
   const diff = useQuery({ queryKey: ["git-diff", project.path, diffPath], queryFn: () => desktopApi.gitDiff(project.path, diffPath as string), enabled: native && !!diffPath, retry: false });
   const [health, setHealth] = useState<HealthIssue[]>([]);
   const [ws, setWs] = useState<ProjectWorkspace>(() => loadWorkspace(project.path));
+  const [thumbPath, setThumbPath] = useState<string>(() => loadThumbnail(project.path));
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>(() => loadTags(project.path));
   const [tagInput, setTagInput] = useState("");
   const [todoText, setTodoText] = useState("");
@@ -55,6 +57,26 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
 
   useEffect(() => saveWorkspace(project.path, ws), [project.path, ws]);
   useEffect(() => saveTags(project.path, tags), [project.path, tags]);
+  useEffect(() => {
+    let active = true;
+    if (thumbPath && native) {
+      desktopApi.readImage(thumbPath).then((url) => { if (active) setThumbUrl(url); }).catch(() => undefined);
+    } else {
+      setThumbUrl(null);
+    }
+    return () => { active = false; };
+  }, [thumbPath, native]);
+
+  async function changeThumbnail() {
+    const selected = await browsePath({ directory: false, title: "Choose a thumbnail image" });
+    if (!selected) return;
+    setThumbPath(selected);
+    saveThumbnail(project.path, selected);
+  }
+  function clearThumbnail() {
+    setThumbPath("");
+    saveThumbnail(project.path, "");
+  }
 
   function addTag(value: string) {
     const tag = value.trim().toLowerCase();
@@ -110,7 +132,11 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
     <section className="space-y-5">
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}><ArrowLeft size={18} /></Button>
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-secondary text-primary"><Box size={24} /></span>
+        <div className="group relative h-14 w-24 shrink-0 overflow-hidden rounded-lg border border-border bg-secondary">
+          {thumbUrl ? <img src={thumbUrl} alt={`${project.name} thumbnail`} className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-primary"><Box size={24} /></span>}
+          <button onClick={() => void changeThumbnail()} disabled={!native} aria-label="Change thumbnail" className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs opacity-0 transition-opacity group-hover:opacity-100"><ImageIcon size={14} className="mr-1" /> Change</button>
+          {thumbPath ? <button onClick={clearThumbnail} aria-label="Remove thumbnail" className="absolute right-0.5 top-0.5 rounded bg-background/80 p-0.5 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"><X size={12} /></button> : null}
+        </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-2xl font-semibold">{project.name}</h1>
           <p className="truncate text-sm text-muted-foreground">{project.path}</p>
@@ -254,19 +280,28 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
 
         <TabsContent value="references" className="mt-4">
           <Card><CardContent className="space-y-3 p-5">
-            <h2 className="text-base font-semibold">References</h2>
-            <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (!refUrl.trim()) return; setWs({ ...ws, references: [...ws.references, { id: newId(), label: refLabel.trim() || refUrl.trim(), url: refUrl.trim() }] }); setRefLabel(""); setRefUrl(""); }}>
-              <Input aria-label="Reference label" placeholder="Label (e.g. Art bible)" value={refLabel} onChange={(e) => setRefLabel(e.target.value)} className="w-48" />
-              <Input aria-label="Reference URL" placeholder="https://… or a file path" value={refUrl} onChange={(e) => setRefUrl(e.target.value)} className="flex-1 min-w-56" />
-              <Button type="submit"><Plus size={15} /> Add</Button>
+            <div><h2 className="text-base font-semibold">References</h2><p className="text-sm text-muted-foreground">Design docs, art bibles, tickets, or local files — one click to open.</p></div>
+            <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (!refUrl.trim()) return; setWs({ ...ws, references: [...ws.references, { id: newId(), label: refLabel.trim() || refUrl.trim(), url: refUrl.trim() }] }); setRefLabel(""); setRefUrl(""); }}>
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">Label<Input aria-label="Reference label" placeholder="e.g. Art bible" value={refLabel} onChange={(e) => setRefLabel(e.target.value)} className="w-48" /></label>
+              <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">Link or file path<Input aria-label="Reference URL or path" required placeholder="https://…  or  D:/Docs/spec.pdf" value={refUrl} onChange={(e) => setRefUrl(e.target.value)} className="min-w-56" /></label>
+              <Button type="submit"><Plus size={15} /> Add reference</Button>
             </form>
-            <div className="space-y-1">{ws.references.length ? ws.references.map((reference) => (
-              <div key={reference.id} className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-muted/40">
-                <ExternalLink size={15} className="shrink-0 text-muted-foreground" />
-                <button className="min-w-0 flex-1 truncate text-left text-sm text-primary hover:underline" onClick={() => native ? void run("Opening reference", () => desktopApi.openPath(reference.url)) : window.open(reference.url, "_blank")}>{reference.label}</button>
-                <Button variant="ghost" size="icon" aria-label="Remove reference" onClick={() => setWs({ ...ws, references: ws.references.filter((r) => r.id !== reference.id) })}><Trash2 size={14} /></Button>
-              </div>
-            )) : <p className="text-sm text-muted-foreground">No references yet. Add design docs, art bibles, tickets, or links.</p>}</div>
+            <ul className="space-y-1.5">{ws.references.length ? ws.references.map((reference) => {
+              const isLink = /^https?:\/\//i.test(reference.url);
+              const open = () => { if (isLink) window.open(reference.url, "_blank"); else void run("Opening reference", () => desktopApi.openPath(reference.url)); };
+              return (
+                <li key={reference.id} className="flex items-center gap-2.5 rounded-lg border border-border p-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">{isLink ? <Link2 size={15} /> : <FileCode2 size={15} />}</span>
+                  <button className="min-w-0 flex-1 text-left" onClick={open} aria-label={`Open ${reference.label}`}>
+                    <span className="block truncate text-sm font-medium text-primary hover:underline">{reference.label}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{reference.url}</span>
+                  </button>
+                  <Button variant="ghost" size="icon" aria-label={`Open ${reference.label}`} title="Open" onClick={open}><ExternalLink size={15} /></Button>
+                  <Button variant="ghost" size="icon" aria-label={`Copy link for ${reference.label}`} title="Copy" onClick={() => { void navigator.clipboard?.writeText(reference.url); toast.success("Copied to clipboard."); }}><Copy size={14} /></Button>
+                  <Button variant="ghost" size="icon" aria-label={`Remove ${reference.label}`} title="Remove" onClick={() => setWs({ ...ws, references: ws.references.filter((r) => r.id !== reference.id) })}><Trash2 size={14} /></Button>
+                </li>
+              );
+            }) : <li className="text-sm text-muted-foreground">No references yet. Add a link or a file path above.</li>}</ul>
           </CardContent></Card>
         </TabsContent>
       </Tabs>

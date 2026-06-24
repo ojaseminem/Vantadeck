@@ -93,7 +93,7 @@ export function isNativeRuntime() { return Boolean(window.__TAURI_INTERNALS__); 
 export function isDemoMode() { return new URLSearchParams(window.location.search).get("demo") === "true"; }
 
 export async function invokeDesktop<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isNativeRuntime()) throw new Error("This operation requires the Vantadeck desktop runtime.");
+  if (!isNativeRuntime()) throw new Error("This operation requires the PipelineOS desktop runtime.");
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(command, args);
 }
@@ -120,6 +120,8 @@ export const desktopApi = {
   projectConfig: (root: string) => invokeDesktop<ProjectConfig>("project_config", { root }),
   recentFiles: (root: string, limit: number) => invokeDesktop<RecentFile[]>("recent_files", { root, limit }),
   openPath: (path: string) => invokeDesktop<void>("open_path", { path }),
+  readImage: (path: string) => invokeDesktop<string | null>("read_image", { path }),
+  readToolsFromDir: (path: string) => invokeDesktop<ToolManifest[]>("read_tools_from_dir", { path }),
   launchExecutable: (executable: string) => invokeDesktop<void>("launch_executable", { executable }),
   listTools: () => invokeDesktop<ToolManifest[]>("list_tools"),
   pinProject: (root: string, pinned: boolean) => invokeDesktop<void>("set_project_pinned", { root, pinned }),

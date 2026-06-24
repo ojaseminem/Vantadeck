@@ -18,11 +18,13 @@ import {
   Home,
   Laptop,
   MoreHorizontal,
+  Plus,
   Rocket,
   RefreshCw,
   Search,
   Settings,
   Star,
+  Trash2,
   Wrench,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -37,7 +39,7 @@ import { Input } from "@/components/ui/input";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { installedApps as defaultApps, pinnedProjects as defaultPinned, recentProjects as defaultRecent, type Project } from "./data";
-import { APP_CATEGORY_LABELS, desktopApi, formatVersion, isDemoMode, isNativeRuntime, loadDashboard, onScanProgress, type HealthIssue, type ScanProgress, type UpdateInfo } from "./bridge";
+import { APP_CATEGORY_LABELS, browsePath, desktopApi, formatVersion, isDemoMode, isNativeRuntime, loadDashboard, onScanProgress, type HealthIssue, type ScanProgress, type ToolManifest, type UpdateInfo } from "./bridge";
 import { Progress } from "@/components/ui/progress";
 import { createQueryClient, useApps, useInvalidate, useProjects, useTools } from "./lib/queries";
 import { type ThemePreference, useTheme } from "./theme";
@@ -45,7 +47,7 @@ import { Onboarding, type OnboardingPrefs } from "./components/onboarding";
 import { PathInput } from "./components/path-input";
 import { ProjectDetail } from "./components/project-detail";
 import { HealthScreen } from "./components/health-screen";
-import { loadCustomApps, loadQuickLaunch, loadTags, newId, saveCustomApps, saveQuickLaunch, type CustomApp } from "./lib/local-store";
+import { loadCustomApps, loadQuickLaunch, loadTags, loadToolSources, newId, saveCustomApps, saveQuickLaunch, saveToolSources, type CustomApp, type ToolSource } from "./lib/local-store";
 import voidlineImage from "./assets/voidline-reactor.png";
 
 type UndoEntry = { label: string; undo: () => Promise<void>; redo: () => Promise<void> };
@@ -189,6 +191,9 @@ function AppShell() {
   const [customCategory, setCustomCategory] = useState("dcc");
   const [quickLaunchIds, setQuickLaunchIds] = useState<string[]>(() => loadQuickLaunch());
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  const [toolSources, setToolSources] = useState<ToolSource[]>(() => loadToolSources());
+  const [gitUrl, setGitUrl] = useState("");
+  const [localTools, setLocalTools] = useState<ToolManifest[]>([]);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [autoUpdate, setAutoUpdate] = useState(() => localStorage.getItem("vantadeck.autoUpdate") !== "false");
   const [appVersion, setAppVersion] = useState("0.2.0");
@@ -359,7 +364,7 @@ function AppShell() {
     const info = await desktopApi.pathInfo(path).catch(() => null);
     if (!info?.isDir) { toast.error("Drop a project folder to import."); return; }
     const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-    if (!window.confirm(`Import "${name}" as a Vantadeck project?`)) return;
+    if (!window.confirm(`Import "${name}" as a PipelineOS project?`)) return;
     await run(`Importing ${name}`, async () => { await desktopApi.importProject(path, name); await invalidate.projects(); });
     openProject({ path, name });
   }
@@ -383,6 +388,34 @@ function AppShell() {
     setCustomApps(apps);
     saveCustomApps(apps);
   }
+  useEffect(() => {
+    if (!isNativeRuntime()) { setLocalTools([]); return; }
+    let active = true;
+    const locals = toolSources.filter((source) => source.type === "local");
+    Promise.all(locals.map((source) => desktopApi.readToolsFromDir(source.value).catch(() => [])))
+      .then((lists) => { if (active) setLocalTools(lists.flat()); });
+    return () => { active = false; };
+  }, [toolSources]);
+
+  function applyToolSources(next: ToolSource[]) {
+    setToolSources(next);
+    saveToolSources(next);
+  }
+  async function addLocalToolSource() {
+    const dir = await browsePath({ directory: true, title: "Choose a folder of tool manifests" });
+    if (!dir || toolSources.some((source) => source.value === dir)) return;
+    applyToolSources([...toolSources, { id: newId(), type: "local", value: dir }]);
+  }
+  function addGitToolSource() {
+    const url = gitUrl.trim();
+    if (!url || toolSources.some((source) => source.value === url)) return;
+    applyToolSources([...toolSources, { id: newId(), type: "git", value: url }]);
+    setGitUrl("");
+  }
+  function removeToolSource(id: string) {
+    applyToolSources(toolSources.filter((source) => source.id !== id));
+  }
+
   function addCustomApp(event: FormEvent) {
     event.preventDefault();
     if (!customName.trim() || !customExe.trim()) return;
@@ -475,7 +508,7 @@ function AppShell() {
 
   async function submitImport(event: FormEvent) {
     event.preventDefault();
-    if (!window.confirm(`Import ${rootInput} and create its local Vantadeck metadata?`)) return;
+    if (!window.confirm(`Import ${rootInput} and create its local PipelineOS metadata?`)) return;
     await run("Importing project", async () => { await desktopApi.importProject(rootInput, nameInput); await invalidate.projects(); });
   }
 
@@ -577,7 +610,7 @@ function AppShell() {
         </section> : null}
         {managedApps.every((app) => app.installations.length === 0) && !customApps.length ? <EmptyState text="No applications detected yet. Click Scan now to find installed creative tools across your drives, or add your own below." /> : null}
         <form onSubmit={addCustomApp}>
-          <Panel title="Add an application" description="Vantadeck supports many engines and creative tools out of the box. Add anything else installed on your machine here.">
+          <Panel title="Add an application" description="PipelineOS supports many engines and creative tools out of the box. Add anything else installed on your machine here.">
             <div className="flex flex-wrap items-start gap-2">
               <Input aria-label="App name" required placeholder="App name" value={customName} onChange={(e) => setCustomName(e.target.value)} className="w-48" />
               <select aria-label="App category" value={customCategory} onChange={(e) => setCustomCategory(e.target.value)} className={themeSelectClass}>
@@ -595,29 +628,47 @@ function AppShell() {
       </div> : null}
 
 
-      {activeScreen === "Tools" ? <div className="space-y-4">
-        <Panel title="Curated Tools Hub" description="Vantadeck shows validated, locally cached community metadata. It never executes downloaded installers or scripts automatically.">
-          {!isNativeRuntime() ? <p className="text-sm text-muted-foreground">Open the native desktop app to read your local cache. Network access remains independently opt-in.</p> : null}
-        </Panel>
-        <div className="grid gap-3 sm:grid-cols-2">{tools.length ? tools.filter((tool) => tool.reviewState !== "withdrawn").map((tool) => (
-          <Card key={tool.id}><CardContent className="flex items-start gap-3 p-4">
-            <Wrench className="text-primary" />
-            <div className="min-w-0 flex-1"><h3 className="font-medium">{tool.name}</h3><p className="text-sm text-muted-foreground">{tool.description}</p><small className="text-xs text-muted-foreground">{tool.reviewState} · {tool.license} · checked {tool.lastVerifiedAt}</small></div>
-            <Button variant="outline" size="sm" onClick={() => toast.message("Reviewed source", { description: `${tool.sourceUrl} — open this in your browser.` })}>Source</Button>
-          </CardContent></Card>
-        )) : <EmptyState text="No validated tool index is cached. Use the CLI cache command after reviewing an index source." />}</div>
-      </div> : null}
+      {activeScreen === "Tools" ? (() => {
+        const allTools = [...tools.filter((tool) => tool.reviewState !== "withdrawn"), ...localTools];
+        return <div className="space-y-4">
+          <Panel title="Tool sources" description="PipelineOS reads validated tool manifests from local folders you trust, and lets you register Git repositories to clone and add. It never executes downloaded installers automatically; network access stays opt-in.">
+            <div className="flex flex-wrap items-end gap-2">
+              <Button variant="outline" onClick={() => void addLocalToolSource()} disabled={!isNativeRuntime()}><FolderOpen size={15} /> Add local folder…</Button>
+              <form className="flex flex-1 items-end gap-2" onSubmit={(e) => { e.preventDefault(); addGitToolSource(); }}>
+                <label className="flex flex-1 flex-col gap-1 text-xs text-muted-foreground">Git repository<Input aria-label="Git repository URL" placeholder="https://github.com/org/tools-index.git" value={gitUrl} onChange={(e) => setGitUrl(e.target.value)} className="min-w-56" /></label>
+                <Button type="submit" variant="outline"><Plus size={15} /> Add repo</Button>
+              </form>
+            </div>
+            {toolSources.length ? <ul className="space-y-1.5">{toolSources.map((source) => (
+              <li key={source.id} className="flex items-center gap-2.5 rounded-lg border border-border p-2.5 text-sm">
+                <Badge variant="outline" className="shrink-0 text-[10px] uppercase">{source.type}</Badge>
+                <span className="min-w-0 flex-1 truncate" title={source.value}>{source.value}</span>
+                {source.type === "git" ? <span className="shrink-0 text-xs text-muted-foreground">clone locally, then add its folder</span> : null}
+                <Button variant="ghost" size="icon" aria-label="Remove source" onClick={() => removeToolSource(source.id)}><Trash2 size={14} /></Button>
+              </li>
+            ))}</ul> : <p className="text-sm text-muted-foreground">No custom sources yet. Add a local folder of tool manifests, or register a Git repo.</p>}
+          </Panel>
+          <SectionLabel>Available tools ({allTools.length})</SectionLabel>
+          <div className="grid gap-3 sm:grid-cols-2">{allTools.length ? allTools.map((tool) => (
+            <Card key={tool.id}><CardContent className="flex items-start gap-3 p-4">
+              <Wrench className="text-primary" />
+              <div className="min-w-0 flex-1"><h3 className="font-medium">{tool.name}</h3><p className="text-sm text-muted-foreground">{tool.description}</p><small className="text-xs text-muted-foreground">{tool.reviewState} · {tool.license} · checked {tool.lastVerifiedAt}</small></div>
+              <Button variant="outline" size="sm" onClick={() => { if (/^https?:\/\//i.test(tool.sourceUrl)) window.open(tool.sourceUrl, "_blank"); else toast.message("Source", { description: tool.sourceUrl }); }}>Source</Button>
+            </CardContent></Card>
+          )) : <EmptyState text="No tools available. Add a local folder of tool manifests above to populate this list." />}</div>
+        </div>;
+      })() : null}
 
       {activeScreen === "Settings" ? <div className="grid gap-4 sm:grid-cols-2">
         <Panel title="Appearance"><label className="flex items-center gap-3 text-sm">Theme<select aria-label="Settings theme" className={themeSelectClass} value={preference} onChange={(event) => setPreference(event.target.value as ThemePreference)}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label></Panel>
         <Panel title="Updates">
-          {update?.available ? <p className="text-sm">Version <strong>{update.version}</strong> is available (you have {update.currentVersion}).{update.notes ? <><br /><span className="text-muted-foreground">{update.notes}</span></> : null}</p> : <p className="text-sm text-muted-foreground">{update ? `You are on the latest version (${update.currentVersion}).` : "Check for a newer signed release. Updates are verified against Vantadeck's signing key before installation."}</p>}
+          {update?.available ? <p className="text-sm">Version <strong>{update.version}</strong> is available (you have {update.currentVersion}).{update.notes ? <><br /><span className="text-muted-foreground">{update.notes}</span></> : null}</p> : <p className="text-sm text-muted-foreground">{update ? `You are on the latest version (${update.currentVersion}).` : "Check for a newer signed release. Updates are verified against PipelineOS's signing key before installation."}</p>}
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => void run("Checking for updates", async () => { const info = await desktopApi.checkForUpdate(); setUpdate(info); toast.message(info.available ? `Update ${info.version} is available.` : "You are on the latest version."); })}><RefreshCw size={15} /> Check for updates</Button>
-            {update?.available ? <Button onClick={() => { if (window.confirm(`Download and install version ${update.version} now? Vantadeck will restart.`)) void run("Installing update", () => desktopApi.installUpdate()); }}><Download size={15} /> Install &amp; restart</Button> : null}
+            {update?.available ? <Button onClick={() => { if (window.confirm(`Download and install version ${update.version} now? PipelineOS will restart.`)) void run("Installing update", () => desktopApi.installUpdate()); }}><Download size={15} /> Install &amp; restart</Button> : null}
           </div>
           <label className="flex items-center gap-2 pt-1 text-sm"><input type="checkbox" checked={autoUpdate} onChange={(event) => setAutoUpdatePref(event.target.checked)} className="size-4 accent-[var(--primary)]" /> Automatically check for updates on launch</label>
-          <p className="text-xs text-muted-foreground">Update info comes from Vantadeck's GitHub releases. Downloads are verified against the signing key before install.</p>
+          <p className="text-xs text-muted-foreground">Update info comes from PipelineOS's GitHub releases. Downloads are verified against the signing key before install.</p>
         </Panel>
         <Panel title="Runtime"><p className="text-sm text-muted-foreground">{runtimeLabel}. Network operations are disabled by default; all indexed data is stored locally.</p></Panel>
       </div> : null}
@@ -628,7 +679,7 @@ function AppShell() {
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       {dragOver ? <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm"><div className="rounded-2xl border-2 border-dashed border-primary px-10 py-8 text-center"><Folder size={36} className="mx-auto mb-2 text-primary" /><p className="text-lg font-semibold">Drop a folder to import it as a project</p></div></div> : null}
       <aside className="flex w-64 flex-none flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
-        <div className="px-2 py-1"><strong className="block text-lg font-bold tracking-tight text-primary">VANTADECK</strong><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Local-first creative launcher</span></div>
+        <div className="px-2 py-1"><strong className="block text-lg font-bold tracking-tight text-primary">PIPELINEOS</strong><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Local-first creative launcher</span></div>
         <nav aria-label="Primary navigation" className="flex flex-col gap-1">
           {navigation.map(([label, Icon]) => (
             <button key={label} onClick={() => openScreen(label)} className={cn("flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", activeScreen === label ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground")}>
@@ -668,7 +719,7 @@ function AppShell() {
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Laptop size={15} /> Offline • Local mode</div>
         </header>
 
-        {update?.available ? <div className="flex items-center gap-2 border-b border-border bg-primary/10 px-6 py-2 text-sm"><Download size={15} className="text-primary" /><span>Vantadeck {update.version} is available.</span><Button variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => openScreen("Settings")}>View update</Button></div> : null}
+        {update?.available ? <div className="flex items-center gap-2 border-b border-border bg-primary/10 px-6 py-2 text-sm"><Download size={15} className="text-primary" /><span>PipelineOS {update.version} is available.</span><Button variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => openScreen("Settings")}>View update</Button></div> : null}
 
         <div className="flex-1 overflow-y-auto p-6">
           {activeScreen === "Home" ? <div className="space-y-6">
@@ -680,7 +731,20 @@ function AppShell() {
                   <div className="flex flex-wrap gap-3 text-sm text-muted-foreground"><span className="flex items-center gap-1.5"><Box size={14} /> {prettyEngine(continueProject.engine)}{continueProject.version ? ` ${continueProject.version}` : ""}</span>{continueProject.branch ? <span className="flex items-center gap-1.5"><GitBranch size={13} /> {continueProject.branch}</span> : null}{continueProject.lastOpened ? <span>Last opened: {continueProject.lastOpened}</span> : null}</div>
                   <ul className="space-y-1.5 text-sm text-muted-foreground"><li className="flex items-center gap-2"><Folder size={14} /> Project metadata and activity stay on this machine.</li><li className="flex items-center gap-2"><FileCode2 size={14} /> Portable settings live in .vantadeck/project.toml.</li></ul>
                 </div>
-                <div className="space-y-3 border-l border-border p-5"><Button className="w-full" onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}>Open Project</Button>
+                <div className="space-y-3 border-l border-border p-5"><div className="flex gap-1">
+                  <Button className="flex-1" onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}>Open Project</Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="More project commands"><ChevronDown size={16} /></Button></DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-52">
+                      <DropdownMenuItem onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}><Folder size={14} /> Open project</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => continueProject && void run(`Opening ${continueProject.name}`, () => desktopApi.launchProjectProfile(continueProject.path, "editor"))}><Rocket size={14} /> Open in Engine</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}><GitBranch size={14} /> Source control</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { if (continueProject && isNativeRuntime()) void run("Opening folder", () => desktopApi.openPath(continueProject.path)); }}><FolderOpen size={14} /> Open folder</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => { if (continueProject) { void navigator.clipboard?.writeText(continueProject.path); toast.success("Path copied."); } }}><Clipboard size={14} /> Copy project path</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
                   <div><h2 className="mb-2 text-sm font-semibold">Health summary</h2>{health.length ? <div className="space-y-2">{health.slice(0, 3).map((issue) => <div key={issue.code} className="flex items-start gap-2 text-sm"><CircleAlert className={cn("shrink-0", issue.severity === "error" ? "text-destructive" : "text-primary")} size={16} /><span className="min-w-0" title={issue.detail}><strong className="block truncate">{issue.title}</strong><small className="line-clamp-2 text-muted-foreground">{issue.detail}</small></span></div>)}</div> : <EmptyState text="No current health issues." />}</div>
                 </div>
               </CardContent></Card> : <Card><CardContent className="p-6"><EmptyState text="Import a project to start working locally." /></CardContent></Card>}
