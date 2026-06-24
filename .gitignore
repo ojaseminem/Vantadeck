@@ -22,3 +22,6 @@ Thumbs.db
 
 # Vantadeck project metadata if the repo is imported as a project
 .vantadeck/
+
+# Local release staging (built artifacts, not source)
+release-assets/
