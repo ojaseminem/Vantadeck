@@ -1,0 +1,27 @@
+# Normalize line endings repo-wide. Text files are stored and checked out with
+# LF on every platform, so Windows' core.autocrlf no longer produces churn.
+* text=auto eol=lf
+
+# Binary assets: never apply line-ending or text conversion.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.bmp   binary
+*.ico   binary
+*.icns  binary
+*.svg   text eol=lf
+*.exe   binary
+*.dll   binary
+*.msi   binary
+*.sig   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+
+# Windows scripts that genuinely require CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
