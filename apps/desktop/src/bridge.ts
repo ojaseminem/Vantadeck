@@ -1,6 +1,9 @@
 import { installedApps, pinnedProjects, recentProjects, type Project } from "./data";
 
 export type HealthIssue = { code: string; title: string; detail: string; severity: string; remediation?: string };
+export type CachedHealth = { issues: HealthIssue[]; checkedAt: string };
+export type ProjectHealthOverview = { name: string; path: string; checkedAt: string | null; issues: HealthIssue[] };
+export type CommitFile = { path: string; status: string };
 export type AppInstallation = { version: string; executable: string; state: string; runnable: boolean };
 export type ManagedApp = { id: string; name: string; category: string; launchable: boolean; installations: AppInstallation[] };
 export type RegisteredProject = { name: string; path: string; pinned: boolean };
@@ -17,6 +20,7 @@ export type ProjectConfig = {
   shortcuts: Array<{ name: string; kind: string; path: string }>;
   version_control?: { provider: string; root: string } | null;
   enabled_health_checks: string[];
+  thumbnail?: string | null;
 };
 export type RecentFile = { path: string; name: string; modified: number };
 export type ScanProgress = { completed: number; total: number; current: string; done: boolean };
@@ -71,8 +75,9 @@ export type DashboardSnapshot = {
   pinnedProjects: Project[];
   recentProjects: Project[];
   apps: Array<{ id: string; name: string; category: string; executable?: string | null; versions: string[] }>;
-  health: HealthIssue[];
+  health: HealthSummary[];
 };
+export type HealthSummary = { code: string; title: string; detail: string; severity: string; project: string };
 
 declare global {
   interface Window { __TAURI_INTERNALS__?: unknown; }
@@ -107,6 +112,12 @@ export const desktopApi = {
   listProjects: () => invokeDesktop<RegisteredProject[]>("list_projects"),
   importProject: (root: string, name?: string) => invokeDesktop("import_project", { root, name: name || null }),
   projectHealth: (root: string) => invokeDesktop<HealthIssue[]>("project_health", { root }),
+  cachedHealth: (root: string) => invokeDesktop<CachedHealth | null>("cached_health", { root }),
+  healthOverview: () => invokeDesktop<ProjectHealthOverview[]>("health_overview"),
+  recordProjectOpened: (root: string) => invokeDesktop<void>("record_project_opened", { root }),
+  setProjectThumbnail: (root: string, source: string) => invokeDesktop<string>("set_project_thumbnail", { root, source }),
+  clearProjectThumbnail: (root: string) => invokeDesktop<void>("clear_project_thumbnail", { root }),
+  gitCommitFiles: (root: string, hash: string) => invokeDesktop<CommitFile[]>("git_commit_files", { root, hash }),
   gitStatus: (root: string) => invokeDesktop<GitStatus>("git_status", { root }),
   listApps: () => invokeDesktop<ManagedApp[]>("list_apps"),
   scanApps: (roots: string[]) => invokeDesktop<unknown[]>("scan_apps", { roots }),

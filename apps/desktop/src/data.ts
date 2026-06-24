@@ -5,6 +5,8 @@ export type Project = {
   engine: string;
   version: string;
   branch: string;
+  /** Project-relative thumbnail path from project.toml, if set. */
+  thumbnail?: string | null;
 };
 
 export const pinnedProjects: Project[] = [

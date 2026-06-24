@@ -27,6 +27,10 @@ pub struct RegisteredProject {
     pub root: PathBuf,
     pub name: String,
     pub pinned: bool,
+    /// UTC timestamp ("YYYY-MM-DD HH:MM:SS") of the last time the project was
+    /// opened from Vantadeck, or `None` if it has not been opened yet.
+    #[serde(default)]
+    pub last_opened: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +117,19 @@ impl Storage {
             "CREATE TABLE IF NOT EXISTS registered_projects (\
                 root_path TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0,\
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\
+            )",
+        )
+        .execute(&pool)
+        .await?;
+        // Additive migration for databases created before `last_opened` existed.
+        // SQLite has no "ADD COLUMN IF NOT EXISTS"; ignore the duplicate-column error.
+        let _ = sqlx::query("ALTER TABLE registered_projects ADD COLUMN last_opened TEXT")
+            .execute(&pool)
+            .await;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS project_health (\
+                root_path TEXT PRIMARY KEY NOT NULL, issues_json TEXT NOT NULL,\
+                checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP\
             )",
         )
         .execute(&pool)
@@ -291,8 +308,8 @@ impl Storage {
 
     pub async fn registered_projects(&self) -> Result<Vec<RegisteredProject>, StorageError> {
         let rows = sqlx::query(
-            "SELECT root_path, name, pinned FROM registered_projects \
-             ORDER BY pinned DESC, name COLLATE NOCASE",
+            "SELECT root_path, name, pinned, last_opened FROM registered_projects \
+             ORDER BY pinned DESC, last_opened DESC, name COLLATE NOCASE",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -302,6 +319,7 @@ impl Storage {
                 root: PathBuf::from(row.get::<String, _>("root_path")),
                 name: row.get("name"),
                 pinned: row.get("pinned"),
+                last_opened: row.get("last_opened"),
             })
             .collect())
     }
@@ -313,7 +331,7 @@ impl Storage {
     ) -> Result<Vec<RegisteredProject>, StorageError> {
         let pattern = format!("%{}%", query.trim());
         let rows = sqlx::query(
-            "SELECT root_path, name, pinned FROM registered_projects \
+            "SELECT root_path, name, pinned, last_opened FROM registered_projects \
              WHERE name LIKE ? COLLATE NOCASE OR root_path LIKE ? COLLATE NOCASE \
              ORDER BY pinned DESC, name COLLATE NOCASE LIMIT ?",
         )
@@ -328,8 +346,53 @@ impl Storage {
                 root: PathBuf::from(row.get::<String, _>("root_path")),
                 name: row.get("name"),
                 pinned: row.get("pinned"),
+                last_opened: row.get("last_opened"),
             })
             .collect())
+    }
+
+    /// Records that a project was opened now (for "last opened" ordering/display).
+    pub async fn touch_project_opened(&self, root: &std::path::Path) -> Result<(), StorageError> {
+        sqlx::query(
+            "UPDATE registered_projects SET last_opened = CURRENT_TIMESTAMP \
+             WHERE root_path = ?",
+        )
+        .bind(root.to_string_lossy().as_ref())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Caches the most recent health-check result for a project as JSON.
+    pub async fn cache_project_health(
+        &self,
+        root: &std::path::Path,
+        issues_json: &str,
+    ) -> Result<(), StorageError> {
+        sqlx::query(
+            "INSERT INTO project_health (root_path, issues_json, checked_at) \
+             VALUES (?, ?, CURRENT_TIMESTAMP) \
+             ON CONFLICT(root_path) DO UPDATE SET issues_json = excluded.issues_json, \
+             checked_at = CURRENT_TIMESTAMP",
+        )
+        .bind(root.to_string_lossy().as_ref())
+        .bind(issues_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Returns the cached health JSON and its check timestamp for a project.
+    pub async fn cached_project_health(
+        &self,
+        root: &std::path::Path,
+    ) -> Result<Option<(String, String)>, StorageError> {
+        let row =
+            sqlx::query("SELECT issues_json, checked_at FROM project_health WHERE root_path = ?")
+                .bind(root.to_string_lossy().as_ref())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|row| (row.get("issues_json"), row.get("checked_at"))))
     }
 
     pub async fn set_project_pinned(

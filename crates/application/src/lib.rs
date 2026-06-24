@@ -35,8 +35,8 @@ use vantadeck_storage::{
     ActivityRecord, ManualOverrideRecord, RegisteredProject, Storage, StorageError,
 };
 use vantadeck_vcs::{
-    GitCommit, GitProvider, VcsError, VcsOperationResult, VcsStatus, VersionControlProvider,
-    evaluate_lfs_health,
+    ChangedFile, GitCommit, GitProvider, VcsError, VcsOperationResult, VcsStatus,
+    VersionControlProvider, evaluate_lfs_health,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +59,8 @@ pub struct ProjectSummary {
     pub version: String,
     pub branch: String,
     pub last_opened: String,
+    /// Project-relative thumbnail path from `project.toml`, if any.
+    pub thumbnail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,11 +85,15 @@ pub struct AppSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HealthSummary {
     pub code: String,
     pub title: String,
     pub detail: String,
     pub severity: String,
+    /// Name of the project this issue belongs to (for cross-project rollups).
+    #[serde(default)]
+    pub project: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +112,7 @@ impl DashboardSnapshot {
             version: version.into(),
             branch: branch.into(),
             last_opened: "Today".into(),
+            thumbnail: None,
         };
         Self {
             network_enabled: false,
@@ -153,6 +160,7 @@ impl DashboardSnapshot {
                 title: "Preferred version missing".into(),
                 detail: "Install the preferred version or select a fallback.".into(),
                 severity: "warning".into(),
+                project: "Voidline".into(),
             }],
         }
     }
@@ -327,6 +335,7 @@ impl ApplicationService {
                 root: root.to_path_buf(),
                 name: project.name.clone(),
                 pinned: false,
+                last_opened: None,
             })
             .await?;
         self.storage
@@ -342,6 +351,51 @@ impl ApplicationService {
     /// Loads the portable project configuration for a single project.
     pub async fn project_config(&self, root: &Path) -> Result<ProjectConfig, ApplicationError> {
         Ok(load_project(root)?)
+    }
+
+    /// Records that a project was just opened (for "last opened" display/order).
+    pub async fn touch_project_opened(&self, root: &Path) -> Result<(), ApplicationError> {
+        self.storage.touch_project_opened(root).await?;
+        Ok(())
+    }
+
+    /// Sets a portable, team-shared thumbnail for a project from a source image.
+    pub async fn set_project_thumbnail(
+        &self,
+        root: &Path,
+        source: &Path,
+    ) -> Result<String, ApplicationError> {
+        Ok(vantadeck_projects::set_project_thumbnail(root, source)?)
+    }
+
+    /// Clears a project's thumbnail.
+    pub async fn clear_project_thumbnail(&self, root: &Path) -> Result<(), ApplicationError> {
+        vantadeck_projects::clear_project_thumbnail(root)?;
+        Ok(())
+    }
+
+    /// The cached health result for a project (issues + check timestamp), if any.
+    pub async fn cached_project_health(
+        &self,
+        root: &Path,
+    ) -> Option<(Vec<HealthIssue>, String)> {
+        let (json, checked_at) = self.storage.cached_project_health(root).await.ok().flatten()?;
+        let issues = serde_json::from_str(&json).ok()?;
+        Some((issues, checked_at))
+    }
+
+    /// Current branch for a project (cheap), used to annotate summaries.
+    pub async fn vcs_current_branch(&self, root: &Path) -> Option<String> {
+        self.git.current_branch(root).await
+    }
+
+    /// Files changed by a single commit.
+    pub async fn vcs_commit_files(
+        &self,
+        root: &Path,
+        hash: &str,
+    ) -> Result<Vec<ChangedFile>, ApplicationError> {
+        Ok(self.git.commit_files(root, hash).await?)
     }
 
     pub async fn search_projects(
@@ -546,14 +600,29 @@ impl ApplicationService {
 
     /// Full project health, including Git and Git-LFS checks. Runs Git
     /// subprocesses, so it is intended for explicit, user-initiated checks.
+    /// The result is cached so other views can show it without re-running.
     pub async fn project_health(&self, root: &Path) -> Vec<HealthIssue> {
-        self.project_health_inner(root, true).await
+        let issues = self.project_health_inner(root, true).await;
+        if let Ok(json) = serde_json::to_string(&issues) {
+            let _ = self.storage.cache_project_health(root, &json).await;
+        }
+        issues
     }
 
     /// Lightweight health (path, config, linked apps, launch profiles) with no
     /// Git/LFS subprocesses — safe to run automatically, e.g. on the dashboard.
     pub async fn project_health_quick(&self, root: &Path) -> Vec<HealthIssue> {
         self.project_health_inner(root, false).await
+    }
+
+    /// Runs the lightweight health check and caches the result, so the dashboard
+    /// and Health screen can refresh the cache cheaply on every load.
+    pub async fn refresh_project_health_quick(&self, root: &Path) -> Vec<HealthIssue> {
+        let issues = self.project_health_inner(root, false).await;
+        if let Ok(json) = serde_json::to_string(&issues) {
+            let _ = self.storage.cache_project_health(root, &json).await;
+        }
+        issues
     }
 
     async fn project_health_inner(&self, root: &Path, include_vcs: bool) -> Vec<HealthIssue> {

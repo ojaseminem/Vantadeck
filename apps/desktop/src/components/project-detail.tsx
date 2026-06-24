@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, Box, Check, ChevronDown, Download, ExternalLink, FileCode2, FolderOpen, GitBranch, GitBranchPlus,
+  ArrowLeft, Box, Check, ChevronDown, ChevronRight, Download, ExternalLink, FileCode2, FolderOpen, GitBranch, GitBranchPlus,
   GitCommitHorizontal, ListTodo, Notebook, Play, Plus, RefreshCw, Rocket, Trash2, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,8 @@ import { toast } from "sonner";
 import { Copy, ImageIcon, Link2, Tag, X } from "lucide-react";
 import { HealthPanel } from "./health-panel";
 import { browsePath, desktopApi, isNativeRuntime, type HealthIssue } from "../bridge";
-import { loadTags, loadThumbnail, loadWorkspace, newId, saveTags, saveThumbnail, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
+import { formatLastOpened } from "../lib/format";
+import { loadTags, loadWorkspace, newId, saveTags, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
 
 function diffLineClass(line: string): string {
   if (line.startsWith("@@")) return "text-primary";
@@ -44,9 +45,12 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const commits = useQuery({ queryKey: ["git-log", project.path], queryFn: () => desktopApi.gitLog(project.path, 30), enabled: native && sourceView === "history", retry: false });
   const diff = useQuery({ queryKey: ["git-diff", project.path, diffPath], queryFn: () => desktopApi.gitDiff(project.path, diffPath as string), enabled: native && !!diffPath, retry: false });
+  const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
+  const commitFiles = useQuery({ queryKey: ["git-commit-files", project.path, expandedCommit], queryFn: () => desktopApi.gitCommitFiles(project.path, expandedCommit as string), enabled: native && !!expandedCommit, retry: false });
   const [health, setHealth] = useState<HealthIssue[]>([]);
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null);
   const [ws, setWs] = useState<ProjectWorkspace>(() => loadWorkspace(project.path));
-  const [thumbPath, setThumbPath] = useState<string>(() => loadThumbnail(project.path));
+  const thumbnail = cfg.data?.thumbnail ?? null;
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>(() => loadTags(project.path));
   const [tagInput, setTagInput] = useState("");
@@ -59,23 +63,44 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
   useEffect(() => saveTags(project.path, tags), [project.path, tags]);
   useEffect(() => {
     let active = true;
-    if (thumbPath && native) {
-      desktopApi.readImage(thumbPath).then((url) => { if (active) setThumbUrl(url); }).catch(() => undefined);
+    if (thumbnail && native) {
+      desktopApi.readImage(`${project.path}/${thumbnail}`).then((url) => { if (active) setThumbUrl(url); }).catch(() => undefined);
     } else {
       setThumbUrl(null);
     }
     return () => { active = false; };
-  }, [thumbPath, native]);
+  }, [thumbnail, project.path, native]);
+
+  // Show the last cached health result immediately so the panel is never blank.
+  useEffect(() => {
+    if (!native) return;
+    let active = true;
+    desktopApi.cachedHealth(project.path).then((cached) => {
+      if (active && cached) { setHealth(cached.issues); setHealthCheckedAt(cached.checkedAt); }
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [native, project.path]);
 
   async function changeThumbnail() {
-    const selected = await browsePath({ directory: false, title: "Choose a thumbnail image" });
-    if (!selected) return;
-    setThumbPath(selected);
-    saveThumbnail(project.path, selected);
+    const source = await browsePath({ directory: false, title: "Choose a thumbnail image" });
+    if (!source) return;
+    await run("Setting thumbnail", async () => {
+      await desktopApi.setProjectThumbnail(project.path, source);
+      await queryClient.invalidateQueries({ queryKey: ["project-config", project.path] });
+    });
   }
   function clearThumbnail() {
-    setThumbPath("");
-    saveThumbnail(project.path, "");
+    void run("Removing thumbnail", async () => {
+      await desktopApi.clearProjectThumbnail(project.path);
+      await queryClient.invalidateQueries({ queryKey: ["project-config", project.path] });
+    });
+  }
+  function runHealth() {
+    void run("Running health checks", async () => {
+      const issues = await desktopApi.projectHealth(project.path);
+      setHealth(issues);
+      setHealthCheckedAt(new Date().toISOString());
+    });
   }
 
   function addTag(value: string) {
@@ -135,7 +160,7 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
         <div className="group relative h-14 w-24 shrink-0 overflow-hidden rounded-lg border border-border bg-secondary">
           {thumbUrl ? <img src={thumbUrl} alt={`${project.name} thumbnail`} className="h-full w-full object-cover" /> : <span className="flex h-full w-full items-center justify-center text-primary"><Box size={24} /></span>}
           <button onClick={() => void changeThumbnail()} disabled={!native} aria-label="Change thumbnail" className="absolute inset-0 flex items-center justify-center bg-background/70 text-xs opacity-0 transition-opacity group-hover:opacity-100"><ImageIcon size={14} className="mr-1" /> Change</button>
-          {thumbPath ? <button onClick={clearThumbnail} aria-label="Remove thumbnail" className="absolute right-0.5 top-0.5 rounded bg-background/80 p-0.5 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"><X size={12} /></button> : null}
+          {thumbnail ? <button onClick={clearThumbnail} aria-label="Remove thumbnail" className="absolute right-0.5 top-0.5 rounded bg-background/80 p-0.5 text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"><X size={12} /></button> : null}
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-2xl font-semibold">{project.name}</h1>
@@ -163,8 +188,12 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
             {cfg.data?.linked_apps.length ? <div><h3 className="mb-1 mt-2 text-sm font-medium">Linked applications</h3><div className="flex flex-wrap gap-1">{cfg.data.linked_apps.map((linked) => <Badge key={linked.app_id} variant="outline">{linked.app_id}{linked.preferred_version ? ` ${linked.preferred_version}` : ""}</Badge>)}</div></div> : null}
           </CardContent></Card>
           <Card><CardContent className="space-y-3 p-5">
-            <div className="flex items-center justify-between"><h2 className="text-base font-semibold">Health</h2><Button variant="outline" size="sm" disabled={!native} onClick={() => void run("Running health checks", async () => setHealth(await desktopApi.projectHealth(project.path)))}>Run checks</Button></div>
+            <div className="flex items-center justify-between gap-2">
+              <div><h2 className="text-base font-semibold">Health</h2>{healthCheckedAt ? <p className="text-xs text-muted-foreground">Last checked {formatLastOpened(healthCheckedAt)}</p> : null}</div>
+              <Button variant="outline" size="sm" disabled={!native} onClick={runHealth}><RefreshCw size={14} /> {healthCheckedAt ? "Re-check" : "Run checks"}</Button>
+            </div>
             {health.length ? <HealthPanel projectPath={project.path} issues={health} />
+              : healthCheckedAt ? <p className="text-sm text-muted-foreground">No health issues found. Engine versions, launch profiles, and source control all look good.</p>
               : <p className="text-sm text-muted-foreground">Run checks to validate engine versions, launch profiles, and source control. You can dismiss issues you don't care about and unhide them here later.</p>}
           </CardContent></Card>
           <Card className="lg:col-span-2"><CardContent className="space-y-3 p-5">
@@ -228,9 +257,27 @@ export function ProjectDetail({ project, onBack }: { project: { path: string; na
                   </>
                 ) : (
                   <div className="max-h-[420px] overflow-y-auto">
-                    {commits.data && commits.data.length ? commits.data.map((entry) => (
-                      <div key={entry.hash} className="border-t border-border px-4 py-2"><p className="truncate text-sm font-medium">{entry.subject}</p><p className="text-xs text-muted-foreground">{entry.shortHash} · {entry.author} · {entry.date}</p></div>
-                    )) : <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">{commits.isLoading ? "Loading…" : "No commits yet."}</div>}
+                    {commits.data && commits.data.length ? commits.data.map((entry) => {
+                      const isOpen = expandedCommit === entry.hash;
+                      return (
+                        <div key={entry.hash} className="border-t border-border">
+                          <button className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted/40" onClick={() => setExpandedCommit(isOpen ? null : entry.hash)}>
+                            {isOpen ? <ChevronDown size={15} className="mt-0.5 shrink-0 text-muted-foreground" /> : <ChevronRight size={15} className="mt-0.5 shrink-0 text-muted-foreground" />}
+                            <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{entry.subject}</span><span className="block text-xs text-muted-foreground">{entry.shortHash} · {entry.author} · {entry.date}</span></span>
+                          </button>
+                          {isOpen ? <div className="border-t border-border bg-muted/20 px-3 py-1.5">
+                            {commitFiles.isLoading ? <p className="py-1 text-xs text-muted-foreground">Loading files…</p>
+                              : commitFiles.data && commitFiles.data.length ? commitFiles.data.map((file) => (
+                                <div key={file.path} className="flex items-center gap-2 py-1 text-sm">
+                                  <FileCode2 size={13} className="shrink-0 text-muted-foreground" />
+                                  <span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span>
+                                  <Badge variant="outline" className="shrink-0 text-[10px] uppercase">{file.status}</Badge>
+                                </div>
+                              )) : <p className="py-1 text-xs text-muted-foreground">No file changes.</p>}
+                          </div> : null}
+                        </div>
+                      );
+                    }) : <div className="border-t border-border px-4 py-8 text-center text-sm text-muted-foreground">{commits.isLoading ? "Loading…" : "No commits yet."}</div>}
                   </div>
                 )}
               </CardContent></Card>

@@ -53,6 +53,7 @@ async fn searches_projects_and_updates_pinned_state() {
                 root: root.into(),
                 name: name.into(),
                 pinned: false,
+                last_opened: None,
             })
             .await
             .expect("register project");
@@ -163,6 +164,7 @@ async fn registers_projects_and_bounds_recent_activity() {
             root: PathBuf::from("D:/Projects/Voidline"),
             name: "Voidline".into(),
             pinned: true,
+            last_opened: None,
         })
         .await
         .expect("register project");

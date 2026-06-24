@@ -1,16 +1,35 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Activity, ChevronDown, ChevronRight, Folder, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { HealthPanel } from "./health-panel";
 import { desktopApi, isNativeRuntime, type HealthIssue, type RegisteredProject } from "../bridge";
+import { formatLastOpened } from "../lib/format";
 
 export function HealthScreen({ projects, onOpenProject }: { projects: RegisteredProject[]; onOpenProject: (project: { path: string; name: string }) => void }) {
   const [results, setResults] = useState<Record<string, HealthIssue[]>>({});
+  const [checkedAt, setCheckedAt] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
+
+  // Pre-populate from cached health so the screen is never blank on open.
+  useEffect(() => {
+    if (!isNativeRuntime()) return;
+    let active = true;
+    desktopApi.healthOverview().then((overview) => {
+      if (!active) return;
+      const cachedResults: Record<string, HealthIssue[]> = {};
+      const cachedAt: Record<string, string> = {};
+      for (const entry of overview) {
+        if (entry.checkedAt) { cachedResults[entry.path] = entry.issues; cachedAt[entry.path] = entry.checkedAt; }
+      }
+      setResults(cachedResults);
+      setCheckedAt(cachedAt);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
 
   async function runOne(path: string, expand = true) {
     if (!isNativeRuntime()) return;
@@ -18,6 +37,7 @@ export function HealthScreen({ projects, onOpenProject }: { projects: Registered
     try {
       const issues = await desktopApi.projectHealth(path);
       setResults((current) => ({ ...current, [path]: issues }));
+      setCheckedAt((current) => ({ ...current, [path]: new Date().toISOString() }));
       if (expand) setExpanded(path);
     } finally {
       setLoading(null);
@@ -63,7 +83,7 @@ export function HealthScreen({ projects, onOpenProject }: { projects: Registered
                   <button className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setExpanded(isExpanded ? null : project.path)}>
                     {isExpanded ? <ChevronDown size={16} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={16} className="shrink-0 text-muted-foreground" />}
                     <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-primary"><Folder size={17} /></span>
-                    <span className="min-w-0 flex-1"><strong className="block truncate font-medium">{project.name}</strong><small className="block truncate text-xs text-muted-foreground">{project.path}</small></span>
+                    <span className="min-w-0 flex-1"><strong className="block truncate font-medium">{project.name}</strong><small className="block truncate text-xs text-muted-foreground">{checkedAt[project.path] ? `Checked ${formatLastOpened(checkedAt[project.path])}` : project.path}</small></span>
                   </button>
                   <div className="flex shrink-0 items-center gap-2">
                     {tally ? (

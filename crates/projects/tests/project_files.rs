@@ -15,6 +15,7 @@ fn saves_and_loads_canonical_project_toml() {
         shortcuts: Vec::new(),
         version_control: None,
         enabled_health_checks: vec!["project-path".into()],
+        thumbnail: None,
     };
 
     save_project(root.path(), &config).expect("saved atomically");
@@ -95,5 +96,6 @@ fn project(name: &str) -> ProjectConfig {
         shortcuts: Vec::new(),
         version_control: None,
         enabled_health_checks: vec!["project-path".into()],
+        thumbnail: None,
     }
 }

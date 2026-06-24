@@ -134,7 +134,55 @@ pub fn infer_project(root: &Path, name: Option<&str>) -> Result<ProjectConfig, P
         shortcuts: Vec::new(),
         version_control: None,
         enabled_health_checks: vec!["project-path".into(), "linked-apps".into()],
+        thumbnail: None,
     })
+}
+
+/// Copies a chosen image into the project's `.vantadeck/` directory and records
+/// the project-relative path in `project.toml`, so the thumbnail is portable and
+/// travels with the repository. Returns the stored project-relative path.
+pub fn set_project_thumbnail(root: &Path, source: &Path) -> Result<String, ProjectError> {
+    if !source.is_file() {
+        return Err(ProjectError::Io(io::Error::new(
+            io::ErrorKind::NotFound,
+            "thumbnail source image does not exist",
+        )));
+    }
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| matches!(value.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"))
+        .unwrap_or_else(|| "png".into());
+    let directory = root.join(".vantadeck");
+    fs::create_dir_all(&directory)?;
+    // Remove any prior thumbnail with a different extension so only one remains.
+    for previous in ["png", "jpg", "jpeg", "gif", "webp", "bmp"] {
+        let candidate = directory.join(format!("thumbnail.{previous}"));
+        if previous != extension && candidate.is_file() {
+            let _ = fs::remove_file(candidate);
+        }
+    }
+    let relative = format!(".vantadeck/thumbnail.{extension}");
+    fs::copy(source, root.join(&relative))?;
+    let mut config = load_project(root)?;
+    config.thumbnail = Some(relative.clone());
+    save_project(root, &config)?;
+    Ok(relative)
+}
+
+/// Clears the project thumbnail: removes the stored image file and the
+/// `thumbnail` entry from `project.toml`.
+pub fn clear_project_thumbnail(root: &Path) -> Result<(), ProjectError> {
+    let mut config = load_project(root)?;
+    if let Some(relative) = config.thumbnail.take() {
+        let file = root.join(&relative);
+        if file.is_file() {
+            let _ = fs::remove_file(file);
+        }
+        save_project(root, &config)?;
+    }
+    Ok(())
 }
 
 pub fn import_project(root: &Path, name: Option<&str>) -> Result<ProjectConfig, ProjectError> {
@@ -358,6 +406,7 @@ mod tests {
             shortcuts: Vec::new(),
             version_control: None,
             enabled_health_checks: vec!["project-path".into()],
+            thumbnail: None,
         }
     }
 

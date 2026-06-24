@@ -13,7 +13,7 @@ use vantadeck_domain::{
 };
 use vantadeck_launcher::LaunchSpec;
 use vantadeck_manifests::{AppManifest, ToolManifest};
-use vantadeck_storage::Storage;
+use vantadeck_storage::{RegisteredProject, Storage};
 use vantadeck_vcs::GitProvider;
 use vantadeck_vcs::VcsOperationResult;
 
@@ -136,14 +136,37 @@ struct DesktopChangedFile {
     status: String,
 }
 
-fn project_summary(name: String, root: &Path, engine: String) -> ProjectSummary {
+/// Builds a rich project summary (engine, version, branch, last-opened,
+/// thumbnail) for the dashboard. Reads the portable config and a cheap current
+/// branch; tolerant of projects without config or Git.
+async fn build_summary(service: &ApplicationService, project: &RegisteredProject) -> ProjectSummary {
+    let config = service.project_config(&project.root).await.ok();
+    let engine = config
+        .as_ref()
+        .map(|config| config.project_type.clone())
+        .unwrap_or_else(|| "project".into());
+    let version = config
+        .as_ref()
+        .and_then(|config| {
+            config
+                .linked_apps
+                .iter()
+                .find_map(|app| app.preferred_version.clone())
+        })
+        .unwrap_or_default();
+    let thumbnail = config.as_ref().and_then(|config| config.thumbnail.clone());
+    let branch = service
+        .vcs_current_branch(&project.root)
+        .await
+        .unwrap_or_default();
     ProjectSummary {
-        name,
-        path: root.display().to_string(),
+        name: project.name.clone(),
+        path: project.root.display().to_string(),
         engine,
-        version: String::new(),
-        branch: String::new(),
-        last_opened: String::new(),
+        version,
+        branch,
+        last_opened: project.last_opened.clone().unwrap_or_default(),
+        thumbnail,
     }
 }
 
@@ -180,32 +203,28 @@ async fn dashboard_snapshot(state: State<'_, DesktopState>) -> Result<DesktopDas
         .map_err(|e| e.to_string())?;
     let mut summaries = Vec::with_capacity(projects.len());
     for project in &projects {
-        let engine = state
-            .service
-            .project_config(&project.root)
-            .await
-            .ok()
-            .map(|config| config.project_type)
-            .unwrap_or_else(|| "project".into());
-        summaries.push(project_summary(project.name.clone(), &project.root, engine));
+        summaries.push(build_summary(&state.service, project).await);
     }
     let detected = apps(&state.service, &state.manifest_dir).await?;
-    let health = if let Some(project) = projects.first() {
-        state
+    // Refresh the lightweight health for every project (cheap, no Git
+    // subprocess) so the cache stays current, then aggregate issues across all
+    // projects for the dashboard rollup.
+    let mut health = Vec::new();
+    for project in &projects {
+        let issues = state
             .service
-            .project_health_quick(&project.root)
-            .await
-            .into_iter()
-            .map(|issue| HealthSummary {
+            .refresh_project_health_quick(&project.root)
+            .await;
+        for issue in issues {
+            health.push(HealthSummary {
                 code: issue.code,
                 title: issue.title,
                 detail: issue.detail,
                 severity: format!("{:?}", issue.severity).to_lowercase(),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+                project: project.name.clone(),
+            });
+        }
+    }
     Ok(DesktopDashboard {
         network_enabled: false,
         continue_project: summaries.first().cloned(),
@@ -273,6 +292,123 @@ async fn project_health(
     state: State<'_, DesktopState>,
 ) -> Result<Vec<HealthIssue>, String> {
     Ok(state.service.project_health(Path::new(&root)).await)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedHealth {
+    issues: Vec<HealthIssue>,
+    checked_at: String,
+}
+
+/// Returns the cached health result for a project (no recompute), if any.
+#[tauri::command(rename_all = "camelCase")]
+async fn cached_health(
+    root: String,
+    state: State<'_, DesktopState>,
+) -> Result<Option<CachedHealth>, String> {
+    Ok(state
+        .service
+        .cached_project_health(Path::new(&root))
+        .await
+        .map(|(issues, checked_at)| CachedHealth { issues, checked_at }))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectHealthOverview {
+    name: String,
+    path: String,
+    checked_at: Option<String>,
+    issues: Vec<HealthIssue>,
+}
+
+/// Per-project cached health for the Health screen's initial render (so it is
+/// never blank). Projects with no cached result are returned with no issues.
+#[tauri::command]
+async fn health_overview(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<ProjectHealthOverview>, String> {
+    let projects = state
+        .service
+        .registered_projects()
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut overview = Vec::with_capacity(projects.len());
+    for project in &projects {
+        let (issues, checked_at) = match state.service.cached_project_health(&project.root).await {
+            Some((issues, checked_at)) => (issues, Some(checked_at)),
+            None => (Vec::new(), None),
+        };
+        overview.push(ProjectHealthOverview {
+            name: project.name.clone(),
+            path: project.root.display().to_string(),
+            checked_at,
+            issues,
+        });
+    }
+    Ok(overview)
+}
+
+/// Records that a project was opened (updates its last-opened timestamp).
+#[tauri::command(rename_all = "camelCase")]
+async fn record_project_opened(
+    root: String,
+    state: State<'_, DesktopState>,
+) -> Result<(), String> {
+    state
+        .service
+        .touch_project_opened(Path::new(&root))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Sets a portable, team-shared project thumbnail from a chosen source image.
+/// Returns the project-relative path stored in `project.toml`.
+#[tauri::command(rename_all = "camelCase")]
+async fn set_project_thumbnail(
+    root: String,
+    source: String,
+    state: State<'_, DesktopState>,
+) -> Result<String, String> {
+    state
+        .service
+        .set_project_thumbnail(Path::new(&root), Path::new(&source))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Clears a project's thumbnail (removes the file and the config entry).
+#[tauri::command(rename_all = "camelCase")]
+async fn clear_project_thumbnail(
+    root: String,
+    state: State<'_, DesktopState>,
+) -> Result<(), String> {
+    state
+        .service
+        .clear_project_thumbnail(Path::new(&root))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Files changed by a single commit (for the source-control history view).
+#[tauri::command(rename_all = "camelCase")]
+async fn git_commit_files(
+    root: String,
+    hash: String,
+    state: State<'_, DesktopState>,
+) -> Result<Vec<DesktopChangedFile>, String> {
+    Ok(state
+        .service
+        .vcs_commit_files(Path::new(&root), &hash)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|file| DesktopChangedFile {
+            path: file.path,
+            status: file.status,
+        })
+        .collect())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -932,6 +1068,12 @@ pub fn run() {
             list_projects,
             import_project,
             project_health,
+            cached_health,
+            health_overview,
+            record_project_opened,
+            set_project_thumbnail,
+            clear_project_thumbnail,
+            git_commit_files,
             git_status,
             list_apps,
             scan_apps,

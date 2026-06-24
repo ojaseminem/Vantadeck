@@ -192,6 +192,52 @@ impl GitProvider {
         Ok(untracked)
     }
 
+    /// Files changed by a single commit, with their status letters (A/M/D/R…).
+    pub async fn commit_files(
+        &self,
+        root: &Path,
+        hash: &str,
+    ) -> Result<Vec<ChangedFile>, VcsError> {
+        let output = self
+            .run(
+                root,
+                &["show", "--name-status", "--pretty=format:", "-z", hash],
+            )
+            .await?;
+        // With -z, records are NUL-separated. A rename/copy entry is three fields
+        // (status, old, new); everything else is two (status, path).
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut fields = text.split('\u{0}').filter(|field| !field.is_empty());
+        let mut files = Vec::new();
+        while let Some(status) = fields.next() {
+            let renamed = status.starts_with('R') || status.starts_with('C');
+            if renamed {
+                fields.next();
+            }
+            if let Some(path) = fields.next() {
+                files.push(ChangedFile {
+                    status: status.chars().next().map(String::from).unwrap_or_default(),
+                    path: path.to_owned(),
+                });
+            }
+        }
+        Ok(files)
+    }
+
+    /// The current branch name (cheap; `HEAD` when detached). Used to annotate
+    /// project summaries without running a full status.
+    pub async fn current_branch(&self, root: &Path) -> Option<String> {
+        let output = self
+            .run_raw(root, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .await
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        (!branch.is_empty()).then_some(branch)
+    }
+
     /// Stages and commits only the given paths.
     pub async fn commit_paths(
         &self,
