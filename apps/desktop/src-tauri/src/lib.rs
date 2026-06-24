@@ -185,7 +185,10 @@ fn derive_engine(config: &ProjectConfig) -> (String, String, String) {
 /// Builds a rich project summary (engine name/icon/version, branch, last-opened,
 /// thumbnail) for the dashboard. Reads the portable config, the engine's
 /// detected executable (for its real icon), and a cheap current branch.
-async fn build_summary(service: &ApplicationService, project: &RegisteredProject) -> ProjectSummary {
+async fn build_summary(
+    service: &ApplicationService,
+    project: &RegisteredProject,
+) -> ProjectSummary {
     let config = service.project_config(&project.root).await.ok();
     let (engine, engine_id, version) = config
         .as_ref()
@@ -453,10 +456,7 @@ async fn rename_project(
 
 /// Records that a project was opened (updates its last-opened timestamp).
 #[tauri::command(rename_all = "camelCase")]
-async fn record_project_opened(
-    root: String,
-    state: State<'_, DesktopState>,
-) -> Result<(), String> {
+async fn record_project_opened(root: String, state: State<'_, DesktopState>) -> Result<(), String> {
     state
         .service
         .touch_project_opened(Path::new(&root))
@@ -1044,7 +1044,12 @@ async fn read_image(path: String) -> Result<Option<String>, String> {
     if !file.is_file() {
         return Ok(None);
     }
-    let mime = match file.extension().and_then(|value| value.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    let mime = match file
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",

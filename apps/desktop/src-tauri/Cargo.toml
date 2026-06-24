@@ -18,12 +18,12 @@ serde.workspace = true
 tauri = { version = "=2.11.3", features = [] }
 tauri-plugin-updater = "2"
 tauri-plugin-dialog = "2"
-vantadeck-application = { path = "../../../crates/application" }
-vantadeck-domain = { path = "../../../crates/domain" }
-vantadeck-launcher = { path = "../../../crates/launcher" }
-vantadeck-manifests = { path = "../../../crates/manifests" }
-vantadeck-storage = { path = "../../../crates/storage" }
-vantadeck-vcs = { path = "../../../crates/vcs" }
+vantadeck-application = { path = "../../../crates/application", version = "0.2.6" }
+vantadeck-domain = { path = "../../../crates/domain", version = "0.2.6" }
+vantadeck-launcher = { path = "../../../crates/launcher", version = "0.2.6" }
+vantadeck-manifests = { path = "../../../crates/manifests", version = "0.2.6" }
+vantadeck-storage = { path = "../../../crates/storage", version = "0.2.6" }
+vantadeck-vcs = { path = "../../../crates/vcs", version = "0.2.6" }
 semver.workspace = true
 serde_json.workspace = true
 base64 = "0.22"

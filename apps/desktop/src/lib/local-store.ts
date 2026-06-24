@@ -42,17 +42,36 @@ export function newId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-/** App ids the user has pinned to the Quick Launch bar. */
-export function loadQuickLaunch(): string[] {
+/**
+ * A pinned Quick Launch target. `id` is the unique pin key: an app id for the
+ * app's primary install, `appId::executable` for a specific version, or a custom
+ * app id. `appId` is what the launcher receives.
+ */
+export type QuickLaunchEntry = {
+  id: string;
+  appId: string;
+  name: string;
+  executable: string | null;
+  version?: string | null;
+  custom: boolean;
+};
+
+/** Quick Launch pins. Migrates the legacy `string[]` (app ids) format. */
+export function loadQuickLaunch(): QuickLaunchEntry[] {
   try {
-    return JSON.parse(localStorage.getItem("vantadeck.quickLaunch") ?? "[]") as string[];
+    const raw = JSON.parse(localStorage.getItem("vantadeck.quickLaunch") ?? "[]") as unknown[];
+    return raw.map((entry) =>
+      typeof entry === "string"
+        ? { id: entry, appId: entry, name: entry, executable: null, custom: false }
+        : (entry as QuickLaunchEntry),
+    );
   } catch {
     return [];
   }
 }
 
-export function saveQuickLaunch(ids: string[]): void {
-  localStorage.setItem("vantadeck.quickLaunch", JSON.stringify(ids));
+export function saveQuickLaunch(entries: QuickLaunchEntry[]): void {
+  localStorage.setItem("vantadeck.quickLaunch", JSON.stringify(entries));
 }
 
 /** Custom thumbnail image path for a project (empty = use default). */

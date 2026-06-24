@@ -40,7 +40,13 @@ jobs:
           git show-ref --verify --quiet "refs/tags/${REQUESTED_TAG}"
           # Require an annotated tag (not a lightweight one). GPG-signing is
           # recommended; if the tag is signed we verify it, otherwise we warn.
-          test "$(git cat-file -t "refs/tags/${REQUESTED_TAG}")" = tag
+          if [[ "$(git cat-file -t "refs/tags/${REQUESTED_TAG}")" != tag ]]; then
+            {
+              echo "release tag must be annotated; lightweight tags cannot carry release metadata"
+              echo "create it with: git tag -a ${REQUESTED_TAG} -m 'Vantadeck ${REQUESTED_TAG#v}'"
+            } >&2
+            exit 1
+          fi
           git verify-tag "${REQUESTED_TAG}" || echo "::warning::Tag ${REQUESTED_TAG} is not GPG-signed (recommended for releases)."
           printf 'tag=%s\n' "${REQUESTED_TAG}" >> "${GITHUB_OUTPUT}"
           printf 'sha=%s\n' "$(git rev-list -n 1 "${REQUESTED_TAG}")" >> "${GITHUB_OUTPUT}"

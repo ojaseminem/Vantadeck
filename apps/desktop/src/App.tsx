@@ -51,7 +51,7 @@ import { Onboarding, type OnboardingPrefs } from "./components/onboarding";
 import { PathInput } from "./components/path-input";
 import { ProjectDetail } from "./components/project-detail";
 import { HealthScreen } from "./components/health-screen";
-import { loadCustomApps, loadQuickLaunch, loadTags, loadToolSources, newId, saveCustomApps, saveQuickLaunch, saveToolSources, type CustomApp, type ToolSource } from "./lib/local-store";
+import { loadCustomApps, loadQuickLaunch, loadTags, loadToolSources, newId, saveCustomApps, saveQuickLaunch, saveToolSources, type CustomApp, type QuickLaunchEntry, type ToolSource } from "./lib/local-store";
 import voidlineImage from "./assets/voidline-reactor.png";
 
 type UndoEntry = { label: string; undo: () => Promise<void>; redo: () => Promise<void> };
@@ -101,15 +101,6 @@ function AppIcon({ executable, size = 22 }: { executable?: string; size?: number
     : <AppWindow size={size} className="text-muted-foreground" />;
 }
 
-/// The Windows platform mark (four panes). Desktop builds target Windows.
-function WindowsIcon({ size = 15 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-label="Windows" role="img">
-      <path d="M0 2.4 6.6 1.5v6.0H0V2.4Zm0 11.2 6.6.9V8.5H0v5.1ZM7.4 1.4 16 0v7.5H7.4V1.4Zm0 13.2L16 16V8.5H7.4v6.1Z" />
-    </svg>
-  );
-}
-
 type ProjectActions = {
   onOpen: (project: Project) => void;
   onLaunch: (project: Project) => void;
@@ -120,11 +111,11 @@ type ProjectActions = {
 function ProjectTable({ projects, actions }: { projects: Project[]; actions: ProjectActions }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border" role="table" aria-label="Projects">
-      <div className="grid grid-cols-[2fr_1fr_1.3fr_0.9fr_0.6fr_190px] gap-3 border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground" role="row">
-        <span>Project</span><span>Last opened</span><span>Engine / version</span><span>Branch</span><span>Platform</span><span>Actions</span>
+      <div className="grid grid-cols-[2fr_1fr_1.3fr_0.9fr_190px] gap-3 border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground" role="row">
+        <span>Project</span><span>Last opened</span><span>Engine / version</span><span>Branch</span><span>Actions</span>
       </div>
       {projects.length === 0 ? <EmptyState text="No projects in this view yet." /> : projects.map((project) => (
-        <div className="grid grid-cols-[2fr_1fr_1.3fr_0.9fr_0.6fr_190px] items-center gap-3 border-b border-border px-4 py-3 text-sm last:border-0 hover:bg-muted/30" role="row" key={project.name}>
+        <div className="grid grid-cols-[2fr_1fr_1.3fr_0.9fr_190px] items-center gap-3 border-b border-border px-4 py-3 text-sm last:border-0 hover:bg-muted/30" role="row" key={project.name}>
           <span className="flex items-center gap-3">
             <ProjectThumb projectPath={project.path} thumbnail={project.thumbnail} className="h-9 w-14" alt={`${project.name} thumbnail`} />
             <span className="flex flex-col"><strong className="font-medium">{project.name}</strong><small className="text-xs text-muted-foreground">{project.path}</small></span>
@@ -132,7 +123,6 @@ function ProjectTable({ projects, actions }: { projects: Project[]; actions: Pro
           <span className="text-muted-foreground">{formatLastOpened(project.lastOpened) || "—"}</span>
           <span className="flex items-center gap-1.5 text-muted-foreground"><AppIcon executable={project.engineExecutable ?? undefined} size={16} /> {project.engine}{project.version ? ` ${project.version}` : ""}</span>
           <span className="flex items-center gap-1.5 text-muted-foreground">{project.branch ? <><GitBranch size={13} /> {project.branch}</> : "—"}</span>
-          <span className="flex items-center text-muted-foreground"><WindowsIcon /></span>
           <span className="flex items-center gap-1.5">
             <Button variant="outline" size="sm" onClick={() => actions.onOpen(project)}><Folder size={14} /> Open Project</Button>
             <DropdownMenu>
@@ -200,7 +190,8 @@ function AppShell() {
   const [customName, setCustomName] = useState("");
   const [customExe, setCustomExe] = useState("");
   const [customCategory, setCustomCategory] = useState("dcc");
-  const [quickLaunchIds, setQuickLaunchIds] = useState<string[]>(() => loadQuickLaunch());
+  const [quickLaunch, setQuickLaunch] = useState<QuickLaunchEntry[]>(() => loadQuickLaunch());
+  const pinnedIds = useMemo(() => new Set(quickLaunch.map((entry) => entry.id)), [quickLaunch]);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [toolSources, setToolSources] = useState<ToolSource[]>(() => loadToolSources());
   const [gitUrl, setGitUrl] = useState("");
@@ -493,14 +484,14 @@ function AppShell() {
     void performUndoable(`Removed ${removed?.name ?? "app"}`, async () => applyCustomApps(next), async () => applyCustomApps(previous));
   }
 
-  function applyQuickLaunch(ids: string[]) {
-    setQuickLaunchIds(ids);
-    saveQuickLaunch(ids);
+  function applyQuickLaunch(entries: QuickLaunchEntry[]) {
+    setQuickLaunch(entries);
+    saveQuickLaunch(entries);
   }
-  function toggleQuickLaunch(id: string) {
-    const previous = quickLaunchIds;
-    const adding = !previous.includes(id);
-    const next = adding ? [...previous, id] : previous.filter((value) => value !== id);
+  function toggleQuickLaunch(entry: QuickLaunchEntry) {
+    const previous = quickLaunch;
+    const adding = !previous.some((existing) => existing.id === entry.id);
+    const next = adding ? [...previous, entry] : previous.filter((existing) => existing.id !== entry.id);
     void performUndoable(
       adding ? "Pinned to Quick Launch" : "Removed from Quick Launch",
       async () => applyQuickLaunch(next),
@@ -508,25 +499,23 @@ function AppShell() {
     );
   }
 
-  // Resolve pinned Quick Launch apps to launchable items; fall back to the first
-  // few detected apps when the user hasn't pinned anything yet.
-  const quickLaunchItems = useMemo(() => {
-    const resolve = (id: string) => {
-      const detected = installedApps.find((app) => app.id === id);
-      if (detected) return { id, name: detected.name, executable: detected.executable ?? null, custom: false };
-      const custom = customApps.find((app) => app.id === id);
-      if (custom) return { id, name: custom.name, executable: custom.executable, custom: true };
-      return null;
-    };
-    if (quickLaunchIds.length) {
-      return quickLaunchIds.map(resolve).filter((item): item is { id: string; name: string; executable: string | null; custom: boolean } => item !== null);
+  // Resolve pinned Quick Launch entries to launchable items, filling in any
+  // missing executable/name from detected apps; fall back to the first few
+  // detected apps when the user hasn't pinned anything yet.
+  const quickLaunchItems = useMemo<QuickLaunchEntry[]>(() => {
+    if (!quickLaunch.length) {
+      return installedApps.slice(0, 6).map((app) => ({ id: app.id, appId: app.id, name: app.name, executable: app.executable ?? null, custom: false }));
     }
-    return installedApps.slice(0, 6).map((app) => ({ id: app.id, name: app.name, executable: app.executable ?? null, custom: false }));
-  }, [quickLaunchIds, installedApps, customApps]);
+    return quickLaunch.map((entry) => {
+      if (entry.executable || entry.custom) return entry;
+      const detected = installedApps.find((app) => app.id === entry.appId);
+      return detected ? { ...entry, name: detected.name, executable: detected.executable ?? null } : entry;
+    });
+  }, [quickLaunch, installedApps]);
 
-  function launchQuick(item: { id: string; name: string; executable: string | null; custom: boolean }) {
+  function launchQuick(item: QuickLaunchEntry) {
     if (!item.executable) { openScreen("Applications"); return; }
-    void run(`Launching ${item.name}`, () => item.custom ? desktopApi.launchExecutable(item.executable!) : desktopApi.launchApp(item.id, item.executable!));
+    void run(`Launching ${item.name}`, () => item.custom ? desktopApi.launchExecutable(item.executable!) : desktopApi.launchApp(item.appId, item.executable!));
   }
 
   const paletteProjects = useMemo(() => {
@@ -641,15 +630,25 @@ function AppShell() {
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{managedApps.filter((app) => app.category === category && app.installations.length > 0).map((app) => {
               const iconInstall = app.installations.find((item) => item.runnable) ?? app.installations[0];
               const launchTarget = app.installations.find((item) => item.runnable);
-              const hasIncompatible = app.installations.some((item) => !item.runnable);
               return (
                 <Card key={app.id}><CardContent className="flex items-start gap-3 p-4">
                   <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary"><AppIcon executable={iconInstall?.executable} size={26} /></span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3>{launchTarget ? <span className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={quickLaunchIds.includes(app.id) ? `Remove ${app.name} from Quick Launch` : `Add ${app.name} to Quick Launch`} onClick={() => toggleQuickLaunch(app.id)}><Star size={15} className={quickLaunchIds.includes(app.id) ? "fill-primary text-primary" : "text-muted-foreground"} /></Button><Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name} ${formatVersion(launchTarget.version)}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchApp(app.id, launchTarget.executable)); }}>Launch</Button></span> : null}</div>
-                    <div className="mt-1.5 flex flex-wrap gap-1">{app.installations.map((item) => <Badge key={item.executable} variant={item.runnable ? "secondary" : "outline"} className={item.runnable ? "" : "text-muted-foreground line-through"}>{formatVersion(item.version)}</Badge>)}</div>
+                    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3>{app.launchable && launchTarget ? <Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name} ${formatVersion(launchTarget.version)}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchApp(app.id, launchTarget.executable)); }}>Launch</Button> : null}</div>
+                    {app.launchable ? <div className="mt-2 space-y-1">{app.installations.map((item) => {
+                      const entry = { id: `${app.id}::${item.executable}`, appId: app.id, name: `${app.name} ${formatVersion(item.version)}`, executable: item.executable, version: item.version, custom: false };
+                      const pinned = pinnedIds.has(entry.id);
+                      return (
+                        <div key={item.executable} className="flex items-center gap-1.5 text-sm">
+                          <Badge variant={item.runnable ? "secondary" : "outline"} className={item.runnable ? "" : "text-muted-foreground line-through"}>{formatVersion(item.version)}</Badge>
+                          {item.runnable ? <>
+                            <Button variant="ghost" size="sm" className="ml-auto h-7 px-2" onClick={() => { if (window.confirm(`Launch ${entry.name}?`)) void run(`Launching ${entry.name}`, () => desktopApi.launchApp(app.id, item.executable)); }}>Launch</Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={pinned ? `Unpin ${entry.name} from Quick Launch` : `Pin ${entry.name} to Quick Launch`} onClick={() => toggleQuickLaunch(entry)}><Star size={14} className={pinned ? "fill-primary text-primary" : "text-muted-foreground"} /></Button>
+                          </> : <span className="ml-auto text-xs text-muted-foreground">Incompatible</span>}
+                        </div>
+                      );
+                    })}</div> : <div className="mt-1.5 flex flex-wrap gap-1">{app.installations.map((item) => <Badge key={item.executable} variant="outline" className="text-muted-foreground">{formatVersion(item.version)}</Badge>)}</div>}
                     {!app.launchable ? <p className="mt-1.5 text-xs text-primary">Detected — used for project version control</p> : null}
-                    {app.launchable && hasIncompatible ? <p className="mt-1.5 text-xs text-muted-foreground">Some versions are built for another architecture and are skipped on launch.</p> : null}
                   </div>
                 </CardContent></Card>
               );
@@ -662,7 +661,7 @@ function AppShell() {
             <Card key={app.id}><CardContent className="flex items-start gap-3 p-4">
               <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary"><AppIcon executable={app.executable} size={26} /></span>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3><span className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={quickLaunchIds.includes(app.id) ? `Remove ${app.name} from Quick Launch` : `Add ${app.name} to Quick Launch`} onClick={() => toggleQuickLaunch(app.id)}><Star size={15} className={quickLaunchIds.includes(app.id) ? "fill-primary text-primary" : "text-muted-foreground"} /></Button><Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchExecutable(app.executable)); }}>Launch</Button></span></div>
+                <div className="flex items-center justify-between gap-2"><h3 className="truncate font-medium">{app.name}</h3><span className="flex items-center gap-1"><Button variant="ghost" size="icon" aria-label={pinnedIds.has(app.id) ? `Remove ${app.name} from Quick Launch` : `Add ${app.name} to Quick Launch`} onClick={() => toggleQuickLaunch({ id: app.id, appId: app.id, name: app.name, executable: app.executable, custom: true })}><Star size={15} className={pinnedIds.has(app.id) ? "fill-primary text-primary" : "text-muted-foreground"} /></Button><Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Launch ${app.name}?`)) void run(`Launching ${app.name}`, () => desktopApi.launchExecutable(app.executable)); }}>Launch</Button></span></div>
                 <p className="mt-1 truncate text-xs text-muted-foreground">{app.executable}</p>
                 <Button variant="ghost" size="sm" className="mt-1 h-auto p-0 text-muted-foreground" onClick={() => removeCustomApp(app.id)}>Remove</Button>
               </div>
@@ -792,7 +791,19 @@ function AppShell() {
                 <div className="space-y-3 py-5"><h1 className="text-2xl font-semibold">{continueProject.name}</h1><p className="text-sm text-muted-foreground">{continueProject.path}</p>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground"><span className="flex items-center gap-1.5"><AppIcon executable={continueProject.engineExecutable ?? undefined} size={16} /> {continueProject.engine}{continueProject.version ? ` ${continueProject.version}` : ""}</span>{continueProject.branch ? <span className="flex items-center gap-1.5"><GitBranch size={13} /> {continueProject.branch}</span> : null}{formatLastOpened(continueProject.lastOpened) ? <span>Last opened: {formatLastOpened(continueProject.lastOpened)}</span> : null}</div>
                   {continueFiles.length ? <div className="pt-1"><div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent items</div><ul className="space-y-1">{continueFiles.map((file) => (
-                    <li key={file.path}><button onClick={() => void run("Opening file", () => desktopApi.openPath(file.path))} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-sm hover:bg-muted/40"><FileCode2 size={14} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{timeAgo(file.modified)}</span></button></li>
+                    <li key={file.path} className="flex items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-muted/40">
+                      <FileCode2 size={14} className="shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate" title={file.path}>{file.name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(file.modified)}</span>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={`Actions for ${file.name}`}><MoreHorizontal size={15} /></Button></DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-52">
+                          <DropdownMenuItem onClick={() => void run("Opening file", () => desktopApi.openPath(file.path))}><FileCode2 size={14} /> Open file</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => { const dir = file.path.replace(/[\\/][^\\/]*$/, ""); if (dir) void run("Opening folder", () => desktopApi.openPath(dir)); }}><FolderOpen size={14} /> Open containing folder</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => { void navigator.clipboard?.writeText(file.path); toast.success("Path copied."); }}><Clipboard size={14} /> Copy path</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </li>
                   ))}</ul></div> : null}
                 </div>
                 <div className="space-y-3 border-l border-border p-5"><div className="flex gap-1">
@@ -833,7 +844,7 @@ function AppShell() {
                 <Card><CardContent className="p-4"><div className="mb-2 flex items-center justify-between text-sm font-semibold">Installed Apps <Button variant="ghost" size="sm" className="h-auto p-0 text-muted-foreground" onClick={() => openScreen("Applications")}>Manage</Button></div><div className="space-y-1">{installedApps.length ? installedApps.map((app) => <button key={app.name} onClick={() => openScreen("Applications")} title={`Manage ${app.name} versions`} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted/50"><span className="flex h-8 w-8 items-center justify-center rounded-md bg-secondary"><AppIcon executable={app.executable ?? undefined} size={18} /></span><span className="min-w-0 flex-1"><strong className="block truncate">{app.name}</strong><small className="block truncate text-xs text-muted-foreground">{[...new Set(app.versions.map(formatVersion))].join(", ")}</small></span><ChevronRight size={15} className="text-muted-foreground" /></button>) : <EmptyState text="No apps detected yet." />}</div></CardContent></Card>
               </aside>
             </section>
-          </div> : activeScreen === "Project" && selectedProject ? <ProjectDetail project={selectedProject} onBack={() => openScreen("Projects")} onRenamed={() => { void invalidate.projects(); reloadDashboard(); }} /> : activeScreen === "Health" ? <HealthScreen projects={registeredProjects} onOpenProject={openProject} /> : managementContent}
+          </div> : activeScreen === "Project" && selectedProject ? <ProjectDetail project={selectedProject} onBack={() => openScreen("Projects")} onRenamed={() => { void invalidate.projects(); reloadDashboard(); }} pinnedIds={pinnedIds} onTogglePin={toggleQuickLaunch} /> : activeScreen === "Health" ? <HealthScreen projects={registeredProjects} onOpenProject={openProject} /> : managementContent}
         </div>
 
         <Onboarding open={onboarding} onComplete={completeOnboarding} onSkip={skipOnboarding} />

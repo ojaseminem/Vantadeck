@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, Box, Check, ChevronDown, ChevronRight, Download, ExternalLink, FileCode2, FolderOpen, GitBranch, GitBranchPlus,
-  GitCommitHorizontal, ListTodo, Notebook, Pencil, Play, Plus, RefreshCw, Rocket, Trash2, Upload,
+  GitCommitHorizontal, ListTodo, Notebook, Pencil, Play, Plus, RefreshCw, Rocket, Star, Trash2, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import { Copy, ImageIcon, Link2, Tag, X } from "lucide-react";
 import { HealthPanel } from "./health-panel";
 import { browsePath, desktopApi, isNativeRuntime, openExternal, type HealthIssue } from "../bridge";
 import { formatLastOpened } from "../lib/format";
-import { loadTags, loadWorkspace, newId, saveTags, saveWorkspace, type ProjectWorkspace } from "../lib/local-store";
+import { loadTags, loadWorkspace, newId, saveTags, saveWorkspace, type ProjectWorkspace, type QuickLaunchEntry } from "../lib/local-store";
 
 function diffLineClass(line: string): string {
   if (line.startsWith("@@")) return "text-primary";
@@ -33,10 +33,11 @@ function timeAgo(epochSeconds: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export function ProjectDetail({ project, onBack, onRenamed }: { project: { path: string; name: string }; onBack: () => void; onRenamed?: (name: string) => void }) {
+export function ProjectDetail({ project, onBack, onRenamed, pinnedIds, onTogglePin }: { project: { path: string; name: string }; onBack: () => void; onRenamed?: (name: string) => void; pinnedIds?: Set<string>; onTogglePin?: (entry: QuickLaunchEntry) => void }) {
   const native = isNativeRuntime();
   const queryClient = useQueryClient();
   const cfg = useQuery({ queryKey: ["project-config", project.path], queryFn: () => desktopApi.projectConfig(project.path), enabled: native, retry: false });
+  const apps = useQuery({ queryKey: ["apps"], queryFn: () => desktopApi.listApps(), enabled: native, retry: false });
   const git = useQuery({ queryKey: ["git-status", project.path], queryFn: () => desktopApi.gitStatus(project.path), enabled: native, retry: false });
   const files = useQuery({ queryKey: ["recent-files", project.path], queryFn: () => desktopApi.recentFiles(project.path, 25), enabled: native });
   const branches = useQuery({ queryKey: ["git-branches", project.path], queryFn: () => desktopApi.gitBranches(project.path), enabled: native, retry: false });
@@ -165,6 +166,7 @@ export function ProjectDetail({ project, onBack, onRenamed }: { project: { path:
 
   const profiles = cfg.data?.launch_profiles ?? [];
   const engine = cfg.data?.project_type ?? "project";
+  const managedApps = apps.data ?? [];
 
   return (
     <section className="space-y-5">
@@ -209,7 +211,6 @@ export function ProjectDetail({ project, onBack, onRenamed }: { project: { path:
             <h2 className="text-base font-semibold">Launch</h2>
             {profiles.length ? <div className="flex flex-wrap gap-2">{profiles.map((profile) => <Button key={profile.id} variant="outline" size="sm" onClick={() => void run(`Launching ${profile.name}`, () => desktopApi.launchProjectProfile(project.path, profile.id))}><Play size={14} /> {profile.name}</Button>)}</div>
               : <p className="text-sm text-muted-foreground">No launch profiles defined in this project's <code>.vantadeck/project.toml</code> yet.</p>}
-            {cfg.data?.linked_apps.length ? <div><h3 className="mb-1 mt-2 text-sm font-medium">Linked applications</h3><div className="flex flex-wrap gap-1">{cfg.data.linked_apps.map((linked) => <Badge key={linked.app_id} variant="outline">{linked.app_id}{linked.preferred_version ? ` ${linked.preferred_version}` : ""}</Badge>)}</div></div> : null}
           </CardContent></Card>
           <Card><CardContent className="space-y-3 p-5">
             <div className="flex items-center justify-between gap-2">
@@ -220,6 +221,33 @@ export function ProjectDetail({ project, onBack, onRenamed }: { project: { path:
               : healthCheckedAt ? <p className="text-sm text-muted-foreground">No health issues found. Engine versions, launch profiles, and source control all look good.</p>
               : <p className="text-sm text-muted-foreground">Run checks to validate engine versions, launch profiles, and source control. You can dismiss issues you don't care about and unhide them here later.</p>}
           </CardContent></Card>
+          {cfg.data?.linked_apps.length ? <Card className="lg:col-span-2"><CardContent className="space-y-3 p-5">
+            <h2 className="text-base font-semibold">Project apps</h2>
+            <p className="-mt-1 text-sm text-muted-foreground">Applications linked to this project. Launch a specific version, or pin one to Quick Launch.</p>
+            <div className="grid gap-2 sm:grid-cols-2">{cfg.data.linked_apps.map((linked) => {
+              const managed = managedApps.find((app) => app.id === linked.app_id);
+              const runnable = managed?.installations.filter((item) => item.runnable) ?? [];
+              return (
+                <div key={linked.app_id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-primary"><Box size={16} /></span>
+                    <span className="min-w-0 flex-1"><strong className="block truncate text-sm font-medium">{managed?.name ?? linked.app_id}</strong>{linked.preferred_version ? <small className="block text-xs text-muted-foreground">Prefers {linked.preferred_version}</small> : null}</span>
+                  </div>
+                  {runnable.length ? <div className="mt-2 space-y-1">{runnable.map((item) => {
+                    const entry: QuickLaunchEntry = { id: `${linked.app_id}::${item.executable}`, appId: linked.app_id, name: `${managed?.name ?? linked.app_id} ${item.version}`, executable: item.executable, version: item.version, custom: false };
+                    const pinned = pinnedIds?.has(entry.id) ?? false;
+                    return (
+                      <div key={item.executable} className="flex items-center gap-1.5 text-sm">
+                        <Badge variant="secondary">{item.version}</Badge>
+                        <Button variant="ghost" size="sm" className="ml-auto h-7 px-2" disabled={!native} onClick={() => { if (window.confirm(`Launch ${entry.name}?`)) void run(`Launching ${entry.name}`, () => desktopApi.launchApp(linked.app_id, item.executable)); }}><Play size={13} /> Launch</Button>
+                        {onTogglePin ? <Button variant="ghost" size="icon" className="h-7 w-7" aria-label={pinned ? `Unpin ${entry.name} from Quick Launch` : `Pin ${entry.name} to Quick Launch`} onClick={() => onTogglePin(entry)}><Star size={14} className={pinned ? "fill-primary text-primary" : "text-muted-foreground"} /></Button> : null}
+                      </div>
+                    );
+                  })}</div> : <p className="mt-2 text-xs text-muted-foreground">{native ? "Not detected on this machine. Scan applications to enable launching." : "Open the desktop app to detect and launch."}</p>}
+                </div>
+              );
+            })}</div>
+          </CardContent></Card> : null}
           <Card className="lg:col-span-2"><CardContent className="space-y-3 p-5">
             <h2 className="flex items-center gap-2 text-base font-semibold"><Tag size={16} /> Tags</h2>
             <div className="flex flex-wrap items-center gap-2">

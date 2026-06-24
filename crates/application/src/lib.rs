@@ -399,11 +399,13 @@ impl ApplicationService {
     }
 
     /// The cached health result for a project (issues + check timestamp), if any.
-    pub async fn cached_project_health(
-        &self,
-        root: &Path,
-    ) -> Option<(Vec<HealthIssue>, String)> {
-        let (json, checked_at) = self.storage.cached_project_health(root).await.ok().flatten()?;
+    pub async fn cached_project_health(&self, root: &Path) -> Option<(Vec<HealthIssue>, String)> {
+        let (json, checked_at) = self
+            .storage
+            .cached_project_health(root)
+            .await
+            .ok()
+            .flatten()?;
         let issues = serde_json::from_str(&json).ok()?;
         Some((issues, checked_at))
     }

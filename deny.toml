@@ -1,14 +1,38 @@
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # Tauri 2's Linux WebKit/GTK stack currently pulls archived gtk3-rs crates.
+  # There is no patched upgrade path until the upstream desktop stack moves off GTK3.
+  { id = "RUSTSEC-2024-0411", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0412", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0413", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0414", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0415", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0416", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0417", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0418", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0419", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  { id = "RUSTSEC-2024-0420", reason = "Transitive Tauri Linux GTK3 dependency; tracked upstream until a non-GTK3 upgrade path is available." },
+  # Tauri's codegen/urlpattern graph currently pulls unmaintained proc-macro-error
+  # and rust-unic crates with no safe patched replacement available to this app.
+  { id = "RUSTSEC-2024-0370", reason = "Transitive Tauri codegen dependency; no direct dependency or safe patched replacement is available." },
+  { id = "RUSTSEC-2025-0075", reason = "Transitive Tauri urlpattern dependency; no direct dependency or safe patched replacement is available." },
+  { id = "RUSTSEC-2025-0080", reason = "Transitive Tauri urlpattern dependency; no direct dependency or safe patched replacement is available." },
+  { id = "RUSTSEC-2025-0081", reason = "Transitive Tauri urlpattern dependency; no direct dependency or safe patched replacement is available." },
+  { id = "RUSTSEC-2025-0098", reason = "Transitive Tauri urlpattern dependency; no direct dependency or safe patched replacement is available." },
+  { id = "RUSTSEC-2025-0100", reason = "Transitive Tauri urlpattern dependency; no direct dependency or safe patched replacement is available." },
+]
 
 [licenses]
 version = 2
 confidence-threshold = 0.8
-allow = ["Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "MPL-2.0"]
+allow = ["Apache-2.0", "Apache-2.0 WITH LLVM-exception", "MIT", "BSD-3-Clause", "ISC", "Unicode-3.0", "Zlib", "MPL-2.0", "CDLA-Permissive-2.0"]
 
 [bans]
-multiple-versions = "warn"
+# Tauri's cross-platform desktop graph intentionally carries many duplicate
+# transitive crates across Windows, macOS, Linux, Android, and codegen targets.
+multiple-versions = "allow"
 wildcards = "deny"
 
 [sources]

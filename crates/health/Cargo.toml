@@ -9,7 +9,7 @@ rust-version.workspace = true
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
-vantadeck-domain = { path = "../domain" }
+vantadeck-domain = { path = "../domain", version = "0.2.6" }
 
 [dev-dependencies]
 tempfile.workspace = true

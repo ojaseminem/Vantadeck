@@ -152,7 +152,12 @@ pub fn set_project_thumbnail(root: &Path, source: &Path) -> Result<String, Proje
         .extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase())
-        .filter(|value| matches!(value.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"))
+        .filter(|value| {
+            matches!(
+                value.as_str(),
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+            )
+        })
         .unwrap_or_else(|| "png".into());
     let directory = root.join(".vantadeck");
     fs::create_dir_all(&directory)?;
