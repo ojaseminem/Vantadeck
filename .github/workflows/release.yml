@@ -1,12 +1,14 @@
 name: Release
 
+# Releases are cut from a local signed build and published manually (see
+# RELEASING.md), so this workflow is manual-only. Running it on every `v*` tag
+# push would fail fast because those tags are lightweight, not the annotated,
+# verifiable tags this pipeline requires. Trigger it by hand to rebuild a tag.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing v-prefixed tag to rebuild as a draft
+        description: Existing annotated v-prefixed tag to rebuild as a draft
         required: true
         type: string
 

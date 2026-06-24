@@ -952,7 +952,10 @@ fn entry_file(root: &Path, linked: Option<&LinkedApp>, exts: &[&str]) -> Option<
 /// Engine-specific arguments to open a project (not just launch the app).
 fn engine_open_arguments(engine_id: &str, root: &Path, config: &ProjectConfig) -> Vec<String> {
     let root_str = root.display().to_string();
-    let linked = config.linked_apps.iter().find(|app| app.app_id == engine_id);
+    let linked = config
+        .linked_apps
+        .iter()
+        .find(|app| app.app_id == engine_id);
     match engine_id {
         "unity" => vec!["-projectPath".into(), root_str],
         "godot" => vec!["--path".into(), root_str, "-e".into()],

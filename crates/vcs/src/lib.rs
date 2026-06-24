@@ -227,19 +227,33 @@ impl GitProvider {
     /// Discards local changes to a single path: reverts a tracked file to HEAD
     /// (unstaging and restoring the working copy), or deletes an untracked file.
     /// Destructive — callers must confirm with the user first.
-    pub async fn discard_path(&self, root: &Path, path: &str) -> Result<VcsOperationResult, VcsError> {
+    pub async fn discard_path(
+        &self,
+        root: &Path,
+        path: &str,
+    ) -> Result<VcsOperationResult, VcsError> {
         let tracked = self
             .run_raw(root, &["ls-files", "--error-unmatch", "--", path])
             .await
             .map(|output| output.status.success())
             .unwrap_or(false);
         if tracked {
-            self.run(root, &["restore", "--staged", "--worktree", "--source=HEAD", "--", path])
-                .await
-                .map(|output| VcsOperationResult {
-                    stdout: String::from_utf8_lossy(&output.stdout).trim().to_owned(),
-                    stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-                })
+            self.run(
+                root,
+                &[
+                    "restore",
+                    "--staged",
+                    "--worktree",
+                    "--source=HEAD",
+                    "--",
+                    path,
+                ],
+            )
+            .await
+            .map(|output| VcsOperationResult {
+                stdout: String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            })
         } else {
             let target = root.join(path);
             std::fs::remove_file(&target)?;
