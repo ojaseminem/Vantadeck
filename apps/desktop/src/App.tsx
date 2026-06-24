@@ -43,6 +43,7 @@ import { APP_CATEGORY_LABELS, browsePath, desktopApi, formatVersion, isDemoMode,
 import { Progress } from "@/components/ui/progress";
 import { createQueryClient, useApps, useInvalidate, useProjects, useTools } from "./lib/queries";
 import { type ThemePreference, useTheme } from "./theme";
+import { BrandLockup } from "./components/brand";
 import { Onboarding, type OnboardingPrefs } from "./components/onboarding";
 import { PathInput } from "./components/path-input";
 import { ProjectDetail } from "./components/project-detail";
@@ -679,7 +680,7 @@ function AppShell() {
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       {dragOver ? <div className="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm"><div className="rounded-2xl border-2 border-dashed border-primary px-10 py-8 text-center"><Folder size={36} className="mx-auto mb-2 text-primary" /><p className="text-lg font-semibold">Drop a folder to import it as a project</p></div></div> : null}
       <aside className="flex w-64 flex-none flex-col gap-4 border-r border-sidebar-border bg-sidebar p-4">
-        <div className="px-2 py-1"><strong className="block text-lg font-bold tracking-tight text-primary">PIPELINEOS</strong><span className="text-[10px] uppercase tracking-widest text-muted-foreground">Local-first creative launcher</span></div>
+        <BrandLockup className="px-2 py-1" />
         <nav aria-label="Primary navigation" className="flex flex-col gap-1">
           {navigation.map(([label, Icon]) => (
             <button key={label} onClick={() => openScreen(label)} className={cn("flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors", activeScreen === label ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground")}>
