@@ -19,11 +19,15 @@ fn rejects_parent_traversal_outside_project_root() {
 
 #[test]
 fn rejects_absolute_project_paths() {
-    let error = resolve_within_root(
-        Path::new("C:/Projects/Voidline"),
-        Path::new("D:/Other/file"),
-    )
-    .expect_err("absolute paths must be machine-local overrides");
+    // Absolute paths must be machine-local overrides, never stored in the
+    // portable project config. What counts as absolute is OS-specific, so the
+    // test uses a path that is genuinely absolute on the host it runs on.
+    #[cfg(windows)]
+    let absolute = Path::new("D:/Other/file");
+    #[cfg(not(windows))]
+    let absolute = Path::new("/Other/file");
+    let error = resolve_within_root(Path::new("C:/Projects/Voidline"), absolute)
+        .expect_err("absolute paths must be machine-local overrides");
     assert_eq!(error.code(), "ABSOLUTE_PROJECT_PATH");
 }
 
