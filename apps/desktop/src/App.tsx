@@ -40,8 +40,8 @@ import { Input } from "@/components/ui/input";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { installedApps as defaultApps, pinnedProjects as defaultPinned, recentProjects as defaultRecent, type Project } from "./data";
-import { APP_CATEGORY_LABELS, browsePath, desktopApi, formatVersion, isDemoMode, isNativeRuntime, loadDashboard, onScanProgress, type HealthSummary, type ScanProgress, type ToolManifest, type UpdateInfo } from "./bridge";
-import { formatLastOpened } from "./lib/format";
+import { APP_CATEGORY_LABELS, browsePath, desktopApi, formatVersion, isDemoMode, isNativeRuntime, loadDashboard, onScanProgress, type HealthSummary, type RecentFile, type ScanProgress, type ToolManifest, type UpdateInfo } from "./bridge";
+import { formatLastOpened, timeAgo } from "./lib/format";
 import { ProjectThumb } from "./components/thumbnail";
 import { Progress } from "@/components/ui/progress";
 import { createQueryClient, useApps, useInvalidate, useProjects, useTools } from "./lib/queries";
@@ -78,10 +78,6 @@ const sampleContinueProject: Project = {
 
 const CATEGORY_ORDER = ["game-engine", "dcc", "art", "code", "version-control", "utility"];
 
-function prettyEngine(engine: string): string {
-  if (!engine) return "Project";
-  return engine.replace(/[-_]/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
-}
 
 const SEARCH_SCOPES = ["all", "projects", "apps", "tools", "health"] as const;
 const SCOPE_LABELS: Record<string, string> = { all: "All", projects: "Projects", apps: "Apps", tools: "Tools", health: "Health" };
@@ -105,6 +101,15 @@ function AppIcon({ executable, size = 22 }: { executable?: string; size?: number
     : <AppWindow size={size} className="text-muted-foreground" />;
 }
 
+/// The Windows platform mark (four panes). Desktop builds target Windows.
+function WindowsIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" aria-label="Windows" role="img">
+      <path d="M0 2.4 6.6 1.5v6.0H0V2.4Zm0 11.2 6.6.9V8.5H0v5.1ZM7.4 1.4 16 0v7.5H7.4V1.4Zm0 13.2L16 16V8.5H7.4v6.1Z" />
+    </svg>
+  );
+}
+
 type ProjectActions = {
   onOpen: (project: Project) => void;
   onLaunch: (project: Project) => void;
@@ -115,18 +120,19 @@ type ProjectActions = {
 function ProjectTable({ projects, actions }: { projects: Project[]; actions: ProjectActions }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border" role="table" aria-label="Projects">
-      <div className="grid grid-cols-[2fr_1fr_1.2fr_1fr_auto] gap-3 border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground" role="row">
-        <span>Project</span><span>Last opened</span><span>Engine / version</span><span>Branch</span><span>Actions</span>
+      <div className="grid grid-cols-[2fr_1fr_1.3fr_0.9fr_0.6fr_auto] gap-3 border-b border-border bg-muted/40 px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground" role="row">
+        <span>Project</span><span>Last opened</span><span>Engine / version</span><span>Branch</span><span>Platform</span><span>Actions</span>
       </div>
       {projects.length === 0 ? <EmptyState text="No projects in this view yet." /> : projects.map((project) => (
-        <div className="grid grid-cols-[2fr_1fr_1.2fr_1fr_auto] items-center gap-3 border-b border-border px-4 py-3 text-sm last:border-0 hover:bg-muted/30" role="row" key={project.name}>
+        <div className="grid grid-cols-[2fr_1fr_1.3fr_0.9fr_0.6fr_auto] items-center gap-3 border-b border-border px-4 py-3 text-sm last:border-0 hover:bg-muted/30" role="row" key={project.name}>
           <span className="flex items-center gap-3">
             <ProjectThumb projectPath={project.path} thumbnail={project.thumbnail} className="h-9 w-14" alt={`${project.name} thumbnail`} />
             <span className="flex flex-col"><strong className="font-medium">{project.name}</strong><small className="text-xs text-muted-foreground">{project.path}</small></span>
           </span>
           <span className="text-muted-foreground">{formatLastOpened(project.lastOpened) || "—"}</span>
-          <span className="flex items-center gap-1.5 text-muted-foreground"><Box size={14} /> {prettyEngine(project.engine)}{project.version ? ` ${project.version}` : ""}</span>
+          <span className="flex items-center gap-1.5 text-muted-foreground"><AppIcon executable={project.engineExecutable ?? undefined} size={16} /> {project.engine}{project.version ? ` ${project.version}` : ""}</span>
           <span className="flex items-center gap-1.5 text-muted-foreground">{project.branch ? <><GitBranch size={13} /> {project.branch}</> : "—"}</span>
+          <span className="flex items-center text-muted-foreground"><WindowsIcon /></span>
           <span className="flex items-center gap-1.5">
             <Button variant="outline" size="sm" onClick={() => actions.onOpen(project)}><Folder size={14} /> Open Project</Button>
             <DropdownMenu>
@@ -173,6 +179,7 @@ function AppShell() {
   const [searchScope, setSearchScope] = useState<"all" | "projects" | "apps" | "tools" | "health">("all");
   const [searchOpen, setSearchOpen] = useState(false);
   const [continueProject, setContinueProject] = useState<Project | null>(isDemoMode() ? sampleContinueProject : null);
+  const [continueFiles, setContinueFiles] = useState<RecentFile[]>([]);
   const [pinnedProjects, setPinnedProjects] = useState(isDemoMode() ? defaultPinned : []);
   const [recentProjects, setRecentProjects] = useState(isDemoMode() ? defaultRecent : []);
   const [installedApps, setInstalledApps] = useState<Array<{ id: string; name: string; executable?: string | null; versions: string[] }>>(
@@ -226,8 +233,34 @@ function AppShell() {
       setPinnedProjects(snapshot.pinnedProjects);
       setRecentProjects(snapshot.recentProjects);
       setInstalledApps(snapshot.apps);
-      setHealth(snapshot.health);
+      setHealth(snapshot.health); // cached health, shown instantly
     });
+  }, []);
+
+  // Recent items for the Continue card (like the dashboard reference).
+  useEffect(() => {
+    if (!continueProject || !isNativeRuntime()) { setContinueFiles([]); return; }
+    let active = true;
+    desktopApi.recentFiles(continueProject.path, 4).then((files) => { if (active) setContinueFiles(files); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [continueProject]);
+
+  // Health refresh strategy (low overhead): a full scan once on launch, and a
+  // lightweight refresh whenever the window regains focus (debounced). The
+  // initial paint already shows the cached result from the snapshot.
+  const lastHealthRefresh = useRef(0);
+  useEffect(() => {
+    if (!isNativeRuntime()) return;
+    const refresh = (full: boolean) => {
+      const now = Date.now();
+      if (!full && now - lastHealthRefresh.current < 20000) return; // debounce focus
+      lastHealthRefresh.current = now;
+      desktopApi.refreshHealth(full).then(setHealth).catch(() => undefined);
+    };
+    refresh(true); // actual scan on launch
+    const onFocus = () => refresh(false);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   useEffect(() => {
@@ -755,8 +788,10 @@ function AppShell() {
               {continueProject ? <Card className="overflow-hidden"><CardContent className="grid gap-5 p-0 lg:grid-cols-[260px_1fr_280px]">
                 {isDemoMode() ? <img src={voidlineImage} alt="Voidline reactor environment" className="h-full max-h-64 w-full object-cover" /> : <ProjectThumb projectPath={continueProject.path} thumbnail={continueProject.thumbnail} className="h-full max-h-64 w-full rounded-none" iconSize={48} alt={`${continueProject.name} thumbnail`} />}
                 <div className="space-y-3 py-5"><h1 className="text-2xl font-semibold">{continueProject.name}</h1><p className="text-sm text-muted-foreground">{continueProject.path}</p>
-                  <div className="flex flex-wrap gap-3 text-sm text-muted-foreground"><span className="flex items-center gap-1.5"><Box size={14} /> {prettyEngine(continueProject.engine)}{continueProject.version ? ` ${continueProject.version}` : ""}</span>{continueProject.branch ? <span className="flex items-center gap-1.5"><GitBranch size={13} /> {continueProject.branch}</span> : null}{formatLastOpened(continueProject.lastOpened) ? <span>Last opened: {formatLastOpened(continueProject.lastOpened)}</span> : null}</div>
-                  <ul className="space-y-1.5 text-sm text-muted-foreground"><li className="flex items-center gap-2"><Folder size={14} /> Project metadata and activity stay on this machine.</li><li className="flex items-center gap-2"><FileCode2 size={14} /> Portable settings live in .vantadeck/project.toml.</li></ul>
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground"><span className="flex items-center gap-1.5"><AppIcon executable={continueProject.engineExecutable ?? undefined} size={16} /> {continueProject.engine}{continueProject.version ? ` ${continueProject.version}` : ""}</span>{continueProject.branch ? <span className="flex items-center gap-1.5"><GitBranch size={13} /> {continueProject.branch}</span> : null}{formatLastOpened(continueProject.lastOpened) ? <span>Last opened: {formatLastOpened(continueProject.lastOpened)}</span> : null}</div>
+                  {continueFiles.length ? <div className="pt-1"><div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent items</div><ul className="space-y-1">{continueFiles.map((file) => (
+                    <li key={file.path}><button onClick={() => void run("Opening file", () => desktopApi.openPath(file.path))} className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-sm hover:bg-muted/40"><FileCode2 size={14} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate">{file.name}</span><span className="shrink-0 text-xs text-muted-foreground">{timeAgo(file.modified)}</span></button></li>
+                  ))}</ul></div> : null}
                 </div>
                 <div className="space-y-3 border-l border-border p-5"><div className="flex gap-1">
                   <Button className="flex-1" onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}>Open Project</Button>

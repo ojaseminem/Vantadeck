@@ -5,6 +5,10 @@ export type Project = {
   engine: string;
   version: string;
   branch: string;
+  /** Catalog id of the engine (e.g. "unity") for logo lookup. */
+  engineId?: string;
+  /** A detected engine executable, for showing its real icon. */
+  engineExecutable?: string | null;
   /** Project-relative thumbnail path from project.toml, if set. */
   thumbnail?: string | null;
 };

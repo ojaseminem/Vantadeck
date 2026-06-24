@@ -136,24 +136,75 @@ struct DesktopChangedFile {
     status: String,
 }
 
-/// Builds a rich project summary (engine, version, branch, last-opened,
-/// thumbnail) for the dashboard. Reads the portable config and a cheap current
-/// branch; tolerant of projects without config or Git.
+/// Known creative engines/tools in priority order, mapping catalog id to a
+/// friendly display name. Used to label a project by its real engine (Unity,
+/// Unreal, …) rather than the generic project type.
+const ENGINE_LABELS: &[(&str, &str)] = &[
+    ("unity", "Unity"),
+    ("unreal-engine", "Unreal Engine"),
+    ("godot", "Godot"),
+    ("blender", "Blender"),
+    ("maya", "Maya"),
+];
+
+/// Derives (display name, catalog id, preferred version) for a project's
+/// primary engine from its linked apps, falling back to the project type.
+fn derive_engine(config: &ProjectConfig) -> (String, String, String) {
+    for (id, label) in ENGINE_LABELS {
+        if let Some(app) = config.linked_apps.iter().find(|app| app.app_id == *id) {
+            return (
+                (*label).to_string(),
+                (*id).to_string(),
+                app.preferred_version.clone().unwrap_or_default(),
+            );
+        }
+    }
+    if let Some(app) = config.linked_apps.first() {
+        return (
+            app.app_id.clone(),
+            app.app_id.clone(),
+            app.preferred_version.clone().unwrap_or_default(),
+        );
+    }
+    // No linked engine: present the project type as a readable label.
+    let label = config
+        .project_type
+        .split(['-', '_'])
+        .map(|word| {
+            let mut chars = word.chars();
+            chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect::<String>())
+                .unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (label, String::new(), String::new())
+}
+
+/// Builds a rich project summary (engine name/icon/version, branch, last-opened,
+/// thumbnail) for the dashboard. Reads the portable config, the engine's
+/// detected executable (for its real icon), and a cheap current branch.
 async fn build_summary(service: &ApplicationService, project: &RegisteredProject) -> ProjectSummary {
     let config = service.project_config(&project.root).await.ok();
-    let engine = config
+    let (engine, engine_id, version) = config
         .as_ref()
-        .map(|config| config.project_type.clone())
-        .unwrap_or_else(|| "project".into());
-    let version = config
-        .as_ref()
-        .and_then(|config| {
-            config
-                .linked_apps
-                .iter()
-                .find_map(|app| app.preferred_version.clone())
-        })
-        .unwrap_or_default();
+        .map(derive_engine)
+        .unwrap_or_else(|| ("Project".into(), String::new(), String::new()));
+    let engine_executable = if engine_id.is_empty() {
+        None
+    } else {
+        service
+            .detected_installations(&engine_id)
+            .await
+            .ok()
+            .and_then(|installations| {
+                installations
+                    .into_iter()
+                    .map(|installation| installation.executable.display().to_string())
+                    .next()
+            })
+    };
     let thumbnail = config.as_ref().and_then(|config| config.thumbnail.clone());
     let branch = service
         .vcs_current_branch(&project.root)
@@ -163,6 +214,8 @@ async fn build_summary(service: &ApplicationService, project: &RegisteredProject
         name: project.name.clone(),
         path: project.root.display().to_string(),
         engine,
+        engine_id,
+        engine_executable,
         version,
         branch,
         last_opened: project.last_opened.clone().unwrap_or_default(),
@@ -206,23 +259,21 @@ async fn dashboard_snapshot(state: State<'_, DesktopState>) -> Result<DesktopDas
         summaries.push(build_summary(&state.service, project).await);
     }
     let detected = apps(&state.service, &state.manifest_dir).await?;
-    // Refresh the lightweight health for every project (cheap, no Git
-    // subprocess) so the cache stays current, then aggregate issues across all
-    // projects for the dashboard rollup.
+    // Cached-first: the dashboard returns the last cached health instantly with
+    // no recompute, so opening is fast. The UI then refreshes via `refresh_health`
+    // (a quick pass on focus, a full scan on launch/recheck).
     let mut health = Vec::new();
     for project in &projects {
-        let issues = state
-            .service
-            .refresh_project_health_quick(&project.root)
-            .await;
-        for issue in issues {
-            health.push(HealthSummary {
-                code: issue.code,
-                title: issue.title,
-                detail: issue.detail,
-                severity: format!("{:?}", issue.severity).to_lowercase(),
-                project: project.name.clone(),
-            });
+        if let Some((issues, _)) = state.service.cached_project_health(&project.root).await {
+            for issue in issues {
+                health.push(HealthSummary {
+                    code: issue.code,
+                    title: issue.title,
+                    detail: issue.detail,
+                    severity: format!("{:?}", issue.severity).to_lowercase(),
+                    project: project.name.clone(),
+                });
+            }
         }
     }
     Ok(DesktopDashboard {
@@ -348,6 +399,42 @@ async fn health_overview(
         });
     }
     Ok(overview)
+}
+
+/// Refreshes health for every project and returns the aggregated rollup.
+/// `full` runs the complete check (engine, profiles, Git, LFS); otherwise a
+/// lightweight pass (no Git subprocesses) is used. Both update the cache.
+#[tauri::command]
+async fn refresh_health(
+    full: bool,
+    state: State<'_, DesktopState>,
+) -> Result<Vec<HealthSummary>, String> {
+    let projects = state
+        .service
+        .registered_projects()
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut health = Vec::new();
+    for project in &projects {
+        let issues = if full {
+            state.service.project_health(&project.root).await
+        } else {
+            state
+                .service
+                .refresh_project_health_quick(&project.root)
+                .await
+        };
+        for issue in issues {
+            health.push(HealthSummary {
+                code: issue.code,
+                title: issue.title,
+                detail: issue.detail,
+                severity: format!("{:?}", issue.severity).to_lowercase(),
+                project: project.name.clone(),
+            });
+        }
+    }
+    Ok(health)
 }
 
 /// Records that a project was opened (updates its last-opened timestamp).
@@ -1070,6 +1157,7 @@ pub fn run() {
             project_health,
             cached_health,
             health_overview,
+            refresh_health,
             record_project_opened,
             set_project_thumbnail,
             clear_project_thumbnail,

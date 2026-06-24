@@ -114,6 +114,7 @@ export const desktopApi = {
   projectHealth: (root: string) => invokeDesktop<HealthIssue[]>("project_health", { root }),
   cachedHealth: (root: string) => invokeDesktop<CachedHealth | null>("cached_health", { root }),
   healthOverview: () => invokeDesktop<ProjectHealthOverview[]>("health_overview"),
+  refreshHealth: (full: boolean) => invokeDesktop<HealthSummary[]>("refresh_health", { full }),
   recordProjectOpened: (root: string) => invokeDesktop<void>("record_project_opened", { root }),
   setProjectThumbnail: (root: string, source: string) => invokeDesktop<string>("set_project_thumbnail", { root, source }),
   clearProjectThumbnail: (root: string) => invokeDesktop<void>("clear_project_thumbnail", { root }),

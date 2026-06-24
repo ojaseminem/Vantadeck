@@ -55,7 +55,12 @@ pub struct DashboardSnapshot {
 pub struct ProjectSummary {
     pub name: String,
     pub path: String,
+    /// Display name of the primary engine/tool (e.g. "Unity", "Unreal Engine").
     pub engine: String,
+    /// Catalog app id of that engine (e.g. "unity") for icon/logo lookup.
+    pub engine_id: String,
+    /// A detected executable for the engine, so the UI can show its real icon.
+    pub engine_executable: Option<String>,
     pub version: String,
     pub branch: String,
     pub last_opened: String,
@@ -109,6 +114,8 @@ impl DashboardSnapshot {
             name: name.into(),
             path: format!("D:/Dev/Projects/{name}"),
             engine: engine.into(),
+            engine_id: engine.to_ascii_lowercase().replace(' ', "-"),
+            engine_executable: None,
             version: version.into(),
             branch: branch.into(),
             last_opened: "Today".into(),
