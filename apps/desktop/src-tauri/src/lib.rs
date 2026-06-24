@@ -759,6 +759,19 @@ async fn launch_project_profile(
         .map_err(|error| error.to_string())
 }
 
+/// Opens a project directly in its connected engine (no launch profile needed).
+#[tauri::command(rename_all = "camelCase")]
+async fn open_in_engine(
+    root: String,
+    state: State<'_, DesktopState>,
+) -> Result<LaunchResult, String> {
+    state
+        .service
+        .open_project_in_engine(Path::new(&root))
+        .await
+        .map_err(|error| error.to_string())
+}
+
 fn require_confirmation(confirmed: bool) -> Result<(), String> {
     confirmed
         .then_some(())
@@ -1202,6 +1215,7 @@ pub fn run() {
             list_tools,
             set_project_pinned,
             launch_project_profile,
+            open_in_engine,
             check_for_update,
             install_update,
             path_info,

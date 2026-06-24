@@ -25,10 +25,10 @@ use vantadeck_detection::{
 };
 use vantadeck_domain::{
     AppInstallation, AppState, DetectedApplication, DetectionEvidence, HealthIssue, HealthSeverity,
-    ProjectConfig,
+    LinkedApp, ProjectConfig,
 };
 use vantadeck_health::{HealthCheck, ProjectPathCheck};
-use vantadeck_launcher::{LaunchError, LaunchSpec, resolve_launch_profile};
+use vantadeck_launcher::{LaunchError, LaunchSpec, ensure_runnable, resolve_launch_profile};
 use vantadeck_manifests::{AppManifest, ManifestError, ToolManifest};
 use vantadeck_projects::{ProjectError, import_project, load_project};
 use vantadeck_storage::{
@@ -499,6 +499,56 @@ impl ApplicationService {
         })
     }
 
+    /// Opens a project directly in its engine, without requiring a pre-defined
+    /// launch profile. The engine is derived from the project's linked apps, a
+    /// detected runnable installation is selected, and engine-appropriate
+    /// arguments open the project (e.g. Unity `-projectPath`, Unreal `.uproject`).
+    pub async fn open_project_in_engine(
+        &self,
+        root: &Path,
+    ) -> Result<LaunchResult, ApplicationError> {
+        let config = load_project(root)?;
+        let engine_id = project_engine_id(&config)
+            .ok_or(ApplicationError::LaunchProfileMissing("engine".into()))?;
+        let preferred = config
+            .linked_apps
+            .iter()
+            .find(|app| app.app_id == engine_id)
+            .and_then(|app| app.preferred_version.clone());
+        let installations = self.local_installations(&engine_id).await?;
+        let eligible = installations
+            .iter()
+            .filter(|installation| {
+                installation.executable.is_file()
+                    && ensure_runnable(&installation.executable).is_ok()
+            })
+            .collect::<Vec<_>>();
+        let selected = preferred
+            .as_deref()
+            .and_then(|version| {
+                eligible
+                    .iter()
+                    .find(|installation| installation.version.to_string() == version)
+                    .copied()
+            })
+            .or_else(|| eligible.iter().max_by_key(|item| &item.version).copied())
+            .ok_or(ApplicationError::Launch(LaunchError::NoCompatibleVersion))?;
+        let arguments = engine_open_arguments(&engine_id, root, &config);
+        let spec = LaunchSpec::new(selected.executable.clone(), arguments, root.to_path_buf())?;
+        let executable = spec.executable.display().to_string();
+        let child = spec.command().spawn()?;
+        self.storage
+            .record_activity(
+                "project-open-engine",
+                &format!("Opened {} in {engine_id}", root.display()),
+            )
+            .await?;
+        Ok(LaunchResult {
+            process_id: child.id(),
+            executable,
+        })
+    }
+
     pub async fn recent_activity(
         &self,
         limit: u32,
@@ -764,6 +814,69 @@ fn require_confirmation(operation: &'static str, confirmed: bool) -> Result<(), 
     confirmed
         .then_some(())
         .ok_or(ApplicationError::ConfirmationRequired(operation))
+}
+
+/// Launchable engines/DCC tools a project can be opened in, in priority order.
+const KNOWN_ENGINES: &[&str] = &["unity", "unreal-engine", "godot", "blender", "maya"];
+
+/// The id of the engine/tool a project is connected to, if any (a known engine
+/// first, otherwise the first linked app). `None` means "no engine connected".
+fn project_engine_id(config: &ProjectConfig) -> Option<String> {
+    for id in KNOWN_ENGINES {
+        if config.linked_apps.iter().any(|app| app.app_id == *id) {
+            return Some((*id).to_string());
+        }
+    }
+    config.linked_apps.first().map(|app| app.app_id.clone())
+}
+
+/// First file in `dir` (non-recursive) whose extension matches `ext`.
+fn find_with_extension(dir: &Path, ext: &str) -> Option<PathBuf> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case(ext))
+        })
+}
+
+/// The project entry file for a DCC tool: the linked `project_file` if it
+/// exists, otherwise the first file in the root matching one of `exts`.
+fn entry_file(root: &Path, linked: Option<&LinkedApp>, exts: &[&str]) -> Option<PathBuf> {
+    if let Some(file) = linked.and_then(|app| app.project_file.clone()) {
+        let candidate = root.join(file);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    exts.iter().find_map(|ext| find_with_extension(root, ext))
+}
+
+/// Engine-specific arguments to open a project (not just launch the app).
+fn engine_open_arguments(engine_id: &str, root: &Path, config: &ProjectConfig) -> Vec<String> {
+    let root_str = root.display().to_string();
+    let linked = config.linked_apps.iter().find(|app| app.app_id == engine_id);
+    match engine_id {
+        "unity" => vec!["-projectPath".into(), root_str],
+        "godot" => vec!["--path".into(), root_str, "-e".into()],
+        "unreal-engine" => linked
+            .and_then(|app| app.project_file.clone())
+            .map(|file| root.join(file))
+            .filter(|path| path.is_file())
+            .or_else(|| find_with_extension(root, "uproject"))
+            .map(|path| vec![path.display().to_string()])
+            .unwrap_or_default(),
+        "blender" => entry_file(root, linked, &["blend"])
+            .map(|path| vec![path.display().to_string()])
+            .unwrap_or_default(),
+        "maya" => entry_file(root, linked, &["ma", "mb"])
+            .map(|path| vec![path.display().to_string()])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
 
 fn system_detection_engine(roots: &[PathBuf]) -> DetectionEngine {

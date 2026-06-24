@@ -140,6 +140,7 @@ export const desktopApi = {
   listTools: () => invokeDesktop<ToolManifest[]>("list_tools"),
   pinProject: (root: string, pinned: boolean) => invokeDesktop<void>("set_project_pinned", { root, pinned }),
   launchProjectProfile: (root: string, profileId: string) => invokeDesktop<{ processId?: number; executable: string }>("launch_project_profile", { root, profileId }),
+  openInEngine: (root: string) => invokeDesktop<{ processId?: number; executable: string }>("open_in_engine", { root }),
   gitSync: (root: string, confirmed: boolean) => invokeDesktop("git_sync", { root, confirmed }),
   gitCommit: (root: string, message: string, confirmed: boolean) => invokeDesktop("git_commit", { root, message, confirmed }),
   gitPush: (root: string, confirmed: boolean) => invokeDesktop("git_push", { root, confirmed }),

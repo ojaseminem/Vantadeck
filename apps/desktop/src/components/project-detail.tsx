@@ -167,6 +167,11 @@ export function ProjectDetail({ project, onBack, onRenamed, pinnedIds, onToggleP
   const profiles = cfg.data?.launch_profiles ?? [];
   const engine = cfg.data?.project_type ?? "project";
   const managedApps = apps.data ?? [];
+  const linkedApps = cfg.data?.linked_apps ?? [];
+  const knownEngines = ["unity", "unreal-engine", "godot", "blender", "maya"];
+  const engineAppId = linkedApps.map((app) => app.app_id).find((id) => knownEngines.includes(id)) ?? linkedApps[0]?.app_id;
+  const engineName = managedApps.find((app) => app.id === engineAppId)?.name ?? engineAppId;
+  const canOpenInEngine = Boolean(engineAppId);
 
   return (
     <section className="space-y-5">
@@ -194,7 +199,7 @@ export function ProjectDetail({ project, onBack, onRenamed, pinnedIds, onToggleP
         </div>
         <Badge variant="secondary" className="capitalize">{engine.replaceAll("-", " ")}</Badge>
         <Button variant="outline" onClick={() => native ? void run("Opening folder", () => desktopApi.openPath(project.path)) : undefined}><FolderOpen size={15} /> Open folder</Button>
-        {profiles[0] ? <Button onClick={() => void run(`Opening ${project.name}`, () => desktopApi.launchProjectProfile(project.path, profiles[0].id))}><Rocket size={15} /> Open in {engine.replaceAll("-", " ")}</Button> : null}
+        <Button disabled={!native || !canOpenInEngine} title={canOpenInEngine ? undefined : "This project isn't connected to an engine."} onClick={() => void run(`Opening ${name}`, () => desktopApi.openInEngine(project.path))}><Rocket size={15} /> Open in {engineName ?? "Engine"}</Button>
       </div>
 
       <Tabs defaultValue="overview">

@@ -131,7 +131,7 @@ function ProjectTable({ projects, actions }: { projects: Project[]; actions: Pro
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
                 <DropdownMenuItem onClick={() => actions.onOpen(project)}><Folder size={14} /> Open project</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => actions.onLaunch(project)}><Rocket size={14} /> Open Project in Engine</DropdownMenuItem>
+                <DropdownMenuItem disabled={!project.engineId} onClick={() => actions.onLaunch(project)}><Rocket size={14} /> Open in Engine</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => actions.onOpen(project)}><GitBranch size={14} /> Source control</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => actions.onOpenFolder(project)}><FolderOpen size={14} /> Open folder</DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -812,7 +812,7 @@ function AppShell() {
                     <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="More project commands"><ChevronDown size={16} /></Button></DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-52">
                       <DropdownMenuItem onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}><Folder size={14} /> Open project</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => continueProject && void run(`Opening ${continueProject.name}`, () => desktopApi.launchProjectProfile(continueProject.path, "editor"))}><Rocket size={14} /> Open in Engine</DropdownMenuItem>
+                      <DropdownMenuItem disabled={!continueProject.engineId} onClick={() => continueProject && void run(`Opening ${continueProject.name}`, () => desktopApi.openInEngine(continueProject.path))}><Rocket size={14} /> Open in Engine</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => continueProject && openProject({ path: continueProject.path, name: continueProject.name })}><GitBranch size={14} /> Source control</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => { if (continueProject && isNativeRuntime()) void run("Opening folder", () => desktopApi.openPath(continueProject.path)); }}><FolderOpen size={14} /> Open folder</DropdownMenuItem>
                       <DropdownMenuSeparator />
@@ -833,7 +833,7 @@ function AppShell() {
                 </div>
                 <ProjectTable projects={filteredProjects} actions={{
                   onOpen: (p) => openProject({ path: p.path, name: p.name }),
-                  onLaunch: (p) => void run(`Opening ${p.name}`, () => desktopApi.launchProjectProfile(p.path, "editor")),
+                  onLaunch: (p) => void run(`Opening ${p.name}`, () => desktopApi.openInEngine(p.path)),
                   onOpenFolder: (p) => { if (isNativeRuntime()) void run("Opening folder", () => desktopApi.openPath(p.path)); },
                   onCopyPath: (p) => { void navigator.clipboard?.writeText(p.path); toast.success("Path copied."); },
                 }} />
