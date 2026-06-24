@@ -1,0 +1,11 @@
+{
+  "version": "0.2.2",
+  "notes": "Pipeline OS v0.2.2. See the release notes for details.",
+  "pub_date": "2026-06-24T10:39:48.728Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTQXBZN1RqaFROcHJtN0JZN3VVUklyS2Jac0paek9IZlVZOFNJeGFZUjhySVQ4NEFrSjdBSlFVaHMwT2VLQ2hnc3BQNXpsSFRTNWhaL3p6WHJsd29yMVZOWTlackw4ekFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyMjk3NTQ1CWZpbGU6UGlwZWxpbmVPU18wLjIuMl94NjQtc2V0dXAuZXhlCmc3UkhzWWQwR25TdEdQTFY5Z2cyd0Jqem83NFh0SFRnWmVXL0x0UW1WbmpVUXJ2Q0tvN3RQUGdKSzNtOTFwalNWNCs1YTdWN1BmODA4VE9uc28xQ0FnPT0K",
+      "url": "https://github.com/ojaseminem/Vantadeck/releases/download/v0.2.2/PipelineOS_0.2.2_x64-setup.exe"
+    }
+  }
+}

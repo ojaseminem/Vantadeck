@@ -17,6 +17,7 @@ import {
   GitBranch,
   Home,
   Laptop,
+  ExternalLink,
   MoreHorizontal,
   Plus,
   Rocket,
@@ -359,6 +360,27 @@ function AppShell() {
     navigate(screen, null);
   }
 
+  /// "View update": open Settings and refresh the update check so the panel
+  /// reflects the latest state (version, notes, install action).
+  function viewUpdate() {
+    openScreen("Settings");
+    if (isNativeRuntime()) desktopApi.checkForUpdate().then(setUpdate).catch(() => undefined);
+  }
+
+  /// Opens the GitHub release page for the available version in the browser.
+  function openReleaseNotes() {
+    const version = update?.version;
+    if (version) window.open(`https://github.com/ojaseminem/Vantadeck/releases/tag/v${version}`, "_blank");
+  }
+
+  /// Confirms, then downloads, installs, and restarts to apply the update.
+  function startUpdate() {
+    if (!update?.available || !isNativeRuntime()) return;
+    if (window.confirm(`Download and install version ${update.version} now? PipelineOS will restart.`)) {
+      void run("Installing update", () => desktopApi.installUpdate());
+    }
+  }
+
   function openProject(target: { path: string; name: string }) {
     if (isNativeRuntime()) desktopApi.recordProjectOpened(target.path).catch(() => undefined);
     navigate("Project", target);
@@ -669,7 +691,8 @@ function AppShell() {
           {update?.available ? <p className="text-sm">Version <strong>{update.version}</strong> is available (you have {update.currentVersion}).{update.notes ? <><br /><span className="text-muted-foreground">{update.notes}</span></> : null}</p> : <p className="text-sm text-muted-foreground">{update ? `You are on the latest version (${update.currentVersion}).` : "Check for a newer signed release. Updates are verified against PipelineOS's signing key before installation."}</p>}
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => void run("Checking for updates", async () => { const info = await desktopApi.checkForUpdate(); setUpdate(info); toast.message(info.available ? `Update ${info.version} is available.` : "You are on the latest version."); })}><RefreshCw size={15} /> Check for updates</Button>
-            {update?.available ? <Button onClick={() => { if (window.confirm(`Download and install version ${update.version} now? PipelineOS will restart.`)) void run("Installing update", () => desktopApi.installUpdate()); }}><Download size={15} /> Install &amp; restart</Button> : null}
+            {update?.available ? <Button variant="outline" onClick={openReleaseNotes}><ExternalLink size={15} /> Release notes</Button> : null}
+            {update?.available ? <Button onClick={startUpdate}><Download size={15} /> Install &amp; restart</Button> : null}
           </div>
           <label className="flex items-center gap-2 pt-1 text-sm"><input type="checkbox" checked={autoUpdate} onChange={(event) => setAutoUpdatePref(event.target.checked)} className="size-4 accent-[var(--primary)]" /> Automatically check for updates on launch</label>
           <p className="text-xs text-muted-foreground">Update info comes from PipelineOS's GitHub releases. Downloads are verified against the signing key before install.</p>
@@ -723,7 +746,7 @@ function AppShell() {
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Laptop size={15} /> Offline • Local mode</div>
         </header>
 
-        {update?.available ? <div className="flex items-center gap-2 border-b border-border bg-primary/10 px-6 py-2 text-sm"><Download size={15} className="text-primary" /><span>PipelineOS {update.version} is available.</span><Button variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => openScreen("Settings")}>View update</Button></div> : null}
+        {update?.available ? <div className="flex items-center gap-2 border-b border-border bg-primary/10 px-6 py-2 text-sm"><Download size={15} className="shrink-0 text-primary" /><span className="min-w-0 flex-1 truncate">PipelineOS {update.version} is available.</span><Button variant="link" size="sm" className="ml-auto h-auto shrink-0 p-0" onClick={viewUpdate}>View update</Button></div> : null}
 
         <div className="flex-1 overflow-y-auto p-6">
           {activeScreen === "Home" ? <div className="space-y-6">
