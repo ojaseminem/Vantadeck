@@ -664,7 +664,7 @@ function AppShell() {
       </div> : null}
 
       {activeScreen === "Applications" ? <div className="space-y-5">
-        <Panel title="Detect installed applications" description="Leave roots blank to auto-scan standard install folders on every drive, or provide semicolon-separated roots. Detection uses bundled, auditable manifests.">
+        <Panel title="Detect installed applications" description="Leave roots blank to auto-scan standard install folders on every drive, or provide semicolon-separated roots. Scans are additive — a new path adds to what's already detected; entries whose executable no longer exists are dropped. Detection uses bundled, auditable manifests.">
           <div className="flex flex-wrap items-start gap-2">
             <PathInput ariaLabel="Scan roots" directory multi disabled={scanning} placeholder="Blank = all drives, or e.g. D:/Tools; E:/Apps" value={scanRoots} onChange={setScanRoots} />
             <Button disabled={scanning} aria-busy={scanning} onClick={() => void runScan()}>{scanning ? <><RefreshCw size={15} className="animate-spin" /> Scanning…</> : "Scan now"}</Button>

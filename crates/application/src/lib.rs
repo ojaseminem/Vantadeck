@@ -317,10 +317,26 @@ impl ApplicationService {
                     }],
                 });
             }
+            // Scans are additive: merge this scan's findings with what was already
+            // detected (deduped by executable, newest wins), so scanning a second
+            // path adds to the list rather than replacing it. Entries whose
+            // executable no longer exists are pruned so uninstalled apps fall off.
+            let existing = self.storage.detected_installations(&application.id).await?;
+            let mut combined = application.installations.clone();
+            for installation in existing {
+                if !combined
+                    .iter()
+                    .any(|item| item.executable == installation.executable)
+                {
+                    combined.push(installation);
+                }
+            }
+            combined.retain(|installation| installation.executable.is_file());
             self.storage
-                .replace_detected_installations(&application.id, &application.installations)
+                .replace_detected_installations(&application.id, &combined)
                 .await?;
-            if !application.installations.is_empty() {
+            if !combined.is_empty() {
+                application.installations = combined;
                 applications.push(application);
             }
         }
