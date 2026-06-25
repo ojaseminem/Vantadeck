@@ -12,14 +12,14 @@ serde.workspace = true
 serde_json.workspace = true
 semver.workspace = true
 thiserror.workspace = true
-vantadeck-domain = { path = "../domain", version = "0.2.6" }
-vantadeck-detection = { path = "../detection", version = "0.2.6" }
-vantadeck-health = { path = "../health", version = "0.2.6" }
-vantadeck-launcher = { path = "../launcher", version = "0.2.6" }
-vantadeck-manifests = { path = "../manifests", version = "0.2.6" }
-vantadeck-projects = { path = "../projects", version = "0.2.6" }
-vantadeck-storage = { path = "../storage", version = "0.2.6" }
-vantadeck-vcs = { path = "../vcs", version = "0.2.6" }
+vantadeck-domain = { path = "../domain" }
+vantadeck-detection = { path = "../detection" }
+vantadeck-health = { path = "../health" }
+vantadeck-launcher = { path = "../launcher" }
+vantadeck-manifests = { path = "../manifests" }
+vantadeck-projects = { path = "../projects" }
+vantadeck-storage = { path = "../storage" }
+vantadeck-vcs = { path = "../vcs" }
 
 [dev-dependencies]
 tempfile.workspace = true

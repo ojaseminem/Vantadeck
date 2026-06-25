@@ -20,13 +20,13 @@ serde_json.workspace = true
 semver.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
-vantadeck-application = { path = "../../crates/application", version = "0.2.6" }
-vantadeck-domain = { path = "../../crates/domain", version = "0.2.6" }
-vantadeck-health = { path = "../../crates/health", version = "0.2.6" }
-vantadeck-projects = { path = "../../crates/projects", version = "0.2.6" }
-vantadeck-security = { path = "../../crates/security", version = "0.2.6" }
-vantadeck-storage = { path = "../../crates/storage", version = "0.2.6" }
-vantadeck-vcs = { path = "../../crates/vcs", version = "0.2.6" }
+vantadeck-application = { path = "../../crates/application" }
+vantadeck-domain = { path = "../../crates/domain" }
+vantadeck-health = { path = "../../crates/health" }
+vantadeck-projects = { path = "../../crates/projects" }
+vantadeck-security = { path = "../../crates/security" }
+vantadeck-storage = { path = "../../crates/storage" }
+vantadeck-vcs = { path = "../../crates/vcs" }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -13,7 +13,7 @@ serde_json.workspace = true
 semver.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
-vantadeck-domain = { path = "../domain", version = "0.2.6" }
+vantadeck-domain = { path = "../domain" }
 
 [dev-dependencies]
 tempfile.workspace = true

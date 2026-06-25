@@ -12,7 +12,7 @@ chrono.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "sync"] }
-vantadeck-domain = { path = "../domain", version = "0.2.6" }
+vantadeck-domain = { path = "../domain" }
 walkdir.workspace = true
 
 [dev-dependencies]

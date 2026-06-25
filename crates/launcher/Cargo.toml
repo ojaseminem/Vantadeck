@@ -10,8 +10,8 @@ rust-version.workspace = true
 semver.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-vantadeck-domain = { path = "../domain", version = "0.2.6" }
-vantadeck-security = { path = "../security", version = "0.2.6" }
+vantadeck-domain = { path = "../domain" }
+vantadeck-security = { path = "../security" }
 
 [dev-dependencies]
 tempfile.workspace = true
