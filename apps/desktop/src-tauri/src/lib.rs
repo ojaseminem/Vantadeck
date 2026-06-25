@@ -1238,6 +1238,128 @@ async fn recent_files(root: String, limit: usize) -> Result<Vec<RecentFile>, Str
     Ok(files)
 }
 
+/// File extensions (without the leading dot, lowercased) a given app opens,
+/// from its manifest's `fileTypes`.
+fn manifest_file_types(manifest_dir: &Path, app_id: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(manifest_dir) else {
+        return Vec::new();
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(&path)
+            && let Ok(manifest) = AppManifest::from_json(&text)
+            && manifest.id == app_id
+        {
+            return manifest
+                .file_types
+                .iter()
+                .map(|file_type| file_type.trim_start_matches('.').to_ascii_lowercase())
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+/// A project's files that open in a specific app (by the app's file types),
+/// most-recently-modified first. Powers the per-app launch list.
+#[tauri::command(rename_all = "camelCase")]
+async fn app_project_files(
+    root: String,
+    app_id: String,
+    state: State<'_, DesktopState>,
+) -> Result<Vec<RecentFile>, String> {
+    let extensions = manifest_file_types(&state.manifest_dir, &app_id);
+    let root = PathBuf::from(root);
+    if extensions.is_empty() || !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let files = tauri::async_runtime::spawn_blocking(move || {
+        let mut out = Vec::new();
+        collect_recent(&root, 5, &mut out);
+        out.retain(|(path, _)| {
+            path.extension()
+                .and_then(|value| value.to_str())
+                .map(|value| extensions.contains(&value.to_ascii_lowercase()))
+                .unwrap_or(false)
+        });
+        out.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
+        out.into_iter()
+            .take(50)
+            .map(|(path, modified)| RecentFile {
+                name: path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                modified: modified
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                path: path.display().to_string(),
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(files)
+}
+
+/// Engine-/app-specific arguments to open a particular file in an app. Maya
+/// opens with the project set so its workspace shows the project as selected.
+fn app_file_arguments(app_id: &str, project_root: &Path, file: &Path) -> Vec<String> {
+    match app_id {
+        "maya" => vec![
+            "-proj".into(),
+            project_root.display().to_string(),
+            file.display().to_string(),
+        ],
+        _ => vec![file.display().to_string()],
+    }
+}
+
+/// Launches an app opening a specific project file (e.g. a Maya scene with the
+/// project set). The executable must be a detected installation of `appId`.
+#[tauri::command(rename_all = "camelCase")]
+async fn launch_app_file(
+    app_id: String,
+    executable: String,
+    file: String,
+    root: String,
+    state: State<'_, DesktopState>,
+) -> Result<LaunchResult, String> {
+    let exe = PathBuf::from(&executable);
+    let installations = state
+        .service
+        .detected_installations(&app_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    if !launch_is_allowed(&installations, &exe) || !exe.is_file() {
+        return Err(
+            "This executable is not a detected installation; rescan applications and try again."
+                .into(),
+        );
+    }
+    vantadeck_launcher::ensure_runnable(&exe).map_err(|e| e.to_string())?;
+    let file_path = PathBuf::from(&file);
+    let working_directory = file_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from(&root));
+    let arguments = app_file_arguments(&app_id, Path::new(&root), &file_path);
+    let executable_display = exe.display().to_string();
+    let child = LaunchSpec::new(exe, arguments, working_directory)
+        .map_err(|e| e.to_string())?
+        .command()
+        .spawn()
+        .map_err(|e| format!("Could not start the application: {e}"))?;
+    Ok(LaunchResult {
+        process_id: child.id(),
+        executable: executable_display,
+    })
+}
+
 /// Reads an image file as a data URL (for custom project thumbnails).
 #[tauri::command(rename_all = "camelCase")]
 async fn read_image(path: String) -> Result<Option<String>, String> {
@@ -1503,6 +1625,8 @@ pub fn run() {
             recent_files,
             read_image,
             read_tools_from_dir,
+            app_project_files,
+            launch_app_file,
             open_path,
             open_url,
             launch_executable,

@@ -51,6 +51,30 @@ function timeAgo(epochSeconds: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+/// Per-app list of the project's files (recent-first) with a launch button that
+/// opens each in the app (Maya opens with the project set).
+function AppFiles({ projectPath, appId, appName, executable, native, run }: { projectPath: string; appId: string; appName: string; executable?: string; native: boolean; run: (label: string, action: () => Promise<unknown>) => Promise<void> }) {
+  const files = useQuery({ queryKey: ["app-files", projectPath, appId], queryFn: () => desktopApi.appProjectFiles(projectPath, appId), enabled: native, retry: false });
+  const [expanded, setExpanded] = useState(false);
+  const list = files.data ?? [];
+  if (!list.length) return null;
+  const shown = expanded ? list : list.slice(0, 5);
+  return (
+    <div className="mt-2 space-y-1 border-t border-border pt-2">
+      <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Files ({list.length})</div>
+      {shown.map((file) => (
+        <div key={file.path} className="flex items-center gap-2 text-sm">
+          <FileCode2 size={13} className="shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate" title={file.path}>{file.name}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{timeAgo(file.modified)}</span>
+          <Button variant="ghost" size="sm" className="h-7 shrink-0 px-2" disabled={!native || !executable} onClick={() => { if (executable) void run(`Opening ${file.name}`, () => desktopApi.launchAppFile(appId, executable, file.path, projectPath)); }}><Play size={12} /> Open</Button>
+        </div>
+      ))}
+      {list.length > 5 ? <button onClick={() => setExpanded(!expanded)} className="text-xs text-muted-foreground hover:text-foreground">{expanded ? "Show fewer" : `Show all ${list.length} ${appName} files`}</button> : null}
+    </div>
+  );
+}
+
 export function ProjectDetail({ project, onBack, onRenamed, onOpenInEngine }: { project: { path: string; name: string }; onBack: () => void; onRenamed?: (name: string) => void; onOpenInEngine?: (target: { path: string; name: string }) => void }) {
   const native = isNativeRuntime();
   const queryClient = useQueryClient();
@@ -369,6 +393,7 @@ export function ProjectDetail({ project, onBack, onRenamed, onOpenInEngine }: { 
               const managed = managedApps.find((app) => app.id === linked.app_id);
               const runnable = (managed?.installations.filter((item) => item.runnable) ?? []).slice().sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true }));
               const selectedVersion = linked.preferred_version && runnable.some((item) => item.version === linked.preferred_version) ? linked.preferred_version : runnable[0]?.version ?? "";
+              const selectedExe = runnable.find((item) => item.version === selectedVersion)?.executable ?? runnable[0]?.executable;
               return (
                 <div key={linked.app_id} className="space-y-2 rounded-lg border border-border p-3">
                   <div className="flex items-center gap-2">
@@ -381,6 +406,7 @@ export function ProjectDetail({ project, onBack, onRenamed, onOpenInEngine }: { 
                     </select>
                     <Button variant="outline" size="sm" className="shrink-0" disabled={!native} onClick={() => void run(`Opening ${managed?.name ?? linked.app_id}`, () => desktopApi.openInEngine(project.path, linked.app_id))}><Play size={13} /> Open</Button>
                   </div> : <p className="text-xs text-muted-foreground">{native ? "Not detected on this machine. Scan applications to enable opening." : "Open the desktop app to detect installed versions."}</p>}
+                  <AppFiles projectPath={project.path} appId={linked.app_id} appName={managed?.name ?? linked.app_id} executable={selectedExe} native={native} run={run} />
                 </div>
               );
             })}</div>
