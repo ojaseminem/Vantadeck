@@ -1062,12 +1062,40 @@ fn engine_open_arguments(engine_id: &str, root: &Path, config: &ProjectConfig) -
     }
 }
 
+/// Whether a path is a bare drive root (e.g. `C:\`), used to distinguish a
+/// "scan this drive" request from a targeted folder scan.
+fn is_drive_root(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    let mut components = path.components();
+    matches!(
+        components.next(),
+        Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+    ) && components.all(|component| matches!(component, Component::RootDir))
+}
+
+/// Curated install locations restricted to the given drives — the standard
+/// detection roots filtered to those drives. Avoids walking whole volumes.
+fn curated_roots_for_drives(drives: &[PathBuf]) -> Vec<PathBuf> {
+    default_detection_roots()
+        .into_iter()
+        .filter(|root| drives.iter().any(|drive| root.starts_with(drive)))
+        .collect()
+}
+
 fn system_detection_engine(roots: &[PathBuf]) -> DetectionEngine {
-    let include_system_sources = roots.is_empty();
-    let filesystem_roots = if include_system_sources {
-        default_detection_roots()
+    // A blank scan, or a scan of whole drives, uses curated install locations
+    // plus the system sources (registry, hubs). A scan of specific folders uses
+    // exactly those folders and skips the system sources.
+    let drive_scan = !roots.is_empty() && roots.iter().all(|root| is_drive_root(root));
+    let include_system_sources = roots.is_empty() || drive_scan;
+    // Curated roots are shallow (bounded depth) so a big Steam library or deep
+    // Program Files tree can't stall the scan; explicit folders go a bit deeper.
+    let (filesystem_roots, depth) = if roots.is_empty() {
+        (default_detection_roots(), 4)
+    } else if drive_scan {
+        (curated_roots_for_drives(roots), 4)
     } else {
-        roots.to_vec()
+        (roots.to_vec(), 6)
     };
     let mut sources: Vec<Box<dyn DetectionSource>> = vec![
         // Manifest-declared install locations (Unity Hub, Epic UE_*, JetBrains,
@@ -1077,7 +1105,7 @@ fn system_detection_engine(roots: &[PathBuf]) -> DetectionEngine {
             "filesystem",
             80,
             filesystem_roots,
-            6,
+            depth,
         )),
     ];
     #[cfg(windows)]

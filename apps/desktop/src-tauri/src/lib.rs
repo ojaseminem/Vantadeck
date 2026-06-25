@@ -764,6 +764,26 @@ async fn scan_apps(
         .map_err(|e| e.to_string())
 }
 
+/// Fixed/removable drive roots present on this machine (for the scan picker).
+#[tauri::command]
+async fn list_drives() -> Result<Vec<String>, String> {
+    #[cfg(windows)]
+    {
+        let mut drives = Vec::new();
+        for letter in b'A'..=b'Z' {
+            let root = format!("{}:\\", letter as char);
+            if Path::new(&root).is_dir() {
+                drives.push(root);
+            }
+        }
+        Ok(drives)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(vec!["/".to_string()])
+    }
+}
+
 #[tauri::command]
 async fn cancel_scan(state: State<'_, DesktopState>) -> Result<(), String> {
     state.scan_cancel.store(true, Ordering::SeqCst);
@@ -1608,6 +1628,7 @@ pub fn run() {
             install_git,
             list_apps,
             scan_apps,
+            list_drives,
             set_manual_override,
             cancel_scan,
             launch_app,

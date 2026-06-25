@@ -15,6 +15,7 @@ import {
   Folder,
   FolderOpen,
   GitBranch,
+  HardDrive,
   Home,
   Laptop,
   ExternalLink,
@@ -28,7 +29,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -197,7 +198,6 @@ function AppShell() {
   const invalidate = useInvalidate();
   const [rootInput, setRootInput] = useState("");
   const [nameInput, setNameInput] = useState("");
-  const [scanRoots, setScanRoots] = useState("");
   const [customApps, setCustomApps] = useState<CustomApp[]>(() => loadCustomApps());
   const [customName, setCustomName] = useState("");
   const [customExe, setCustomExe] = useState("");
@@ -214,6 +214,10 @@ function AppShell() {
   const [autostart, setAutostart] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  const [drives, setDrives] = useState<string[]>([]);
+  const [selectedDrives, setSelectedDrives] = useState<Set<string>>(new Set());
+  const [scanDriveLabel, setScanDriveLabel] = useState("");
+  const cancelScanRef = useRef(false);
   const [onboarding, setOnboarding] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -295,6 +299,7 @@ function AppShell() {
     if (!isNativeRuntime()) return;
     desktopApi.appVersion().then(setAppVersion).catch(() => undefined);
     desktopApi.autostartEnabled().then(setAutostart).catch(() => undefined);
+    desktopApi.listDrives().then((found) => { setDrives(found); setSelectedDrives(new Set(found)); }).catch(() => undefined);
     if (autoUpdate) {
       desktopApi.checkForUpdate().then((info) => { if (info.available) setUpdate(info); }).catch(() => undefined);
     }
@@ -382,13 +387,57 @@ function AppShell() {
       setScanProgress(null);
     }
   }
-  const runScan = () => scanWith(scanRoots);
+  // Scans the chosen drives one at a time. Scanning every drive in a single
+  // pass can stall on large install trees, so each drive is a bounded,
+  // additive pass and the loop can be cancelled between (and during) drives.
+  async function scanDrives() {
+    if (scanning) return;
+    const targets = drives.filter((drive) => selectedDrives.has(drive));
+    if (!targets.length) { toast.message("Select at least one drive to scan."); return; }
+    setScanning(true);
+    cancelScanRef.current = false;
+    setScanProgress({ completed: 0, total: 0, current: "", done: false });
+    const unsubscribe = await onScanProgress(setScanProgress);
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        if (cancelScanRef.current) break;
+        const drive = targets[i];
+        setScanDriveLabel(`${drive} (${i + 1}/${targets.length})`);
+        setScanProgress({ completed: 0, total: 0, current: "", done: false });
+        try {
+          await desktopApi.scanApps([drive]);
+        } catch (error) {
+          if (cancelScanRef.current) break;
+          toast.error(`Could not scan ${drive}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        await invalidate.apps();
+      }
+      if (!cancelScanRef.current) toast.success(`Scanned ${targets.length} drive${targets.length === 1 ? "" : "s"}.`);
+    } finally {
+      unsubscribe();
+      setScanning(false);
+      setScanProgress(null);
+      setScanDriveLabel("");
+    }
+  }
+
+  function cancelDriveScan() {
+    cancelScanRef.current = true;
+    void desktopApi.cancelScan();
+  }
+
+  function toggleDrive(drive: string) {
+    setSelectedDrives((prev) => {
+      const next = new Set(prev);
+      if (next.has(drive)) next.delete(drive); else next.add(drive);
+      return next;
+    });
+  }
 
   function completeOnboarding(prefs: OnboardingPrefs) {
     localStorage.setItem("vantadeck.onboarded", "true");
     localStorage.setItem("vantadeck.profile", JSON.stringify(prefs));
     setPreference(prefs.theme);
-    setScanRoots(prefs.scanRoots);
     setOnboarding(false);
     navigate("Applications");
     if (isNativeRuntime()) void scanWith(prefs.scanRoots);
@@ -680,15 +729,41 @@ function AppShell() {
       </div> : null}
 
       {activeScreen === "Applications" ? <div className="space-y-5">
-        <Panel title="Detect installed applications" description="Leave roots blank to auto-scan standard install folders on every drive, or provide semicolon-separated roots. Scans are additive — a new path adds to what's already detected; entries whose executable no longer exists are dropped. Detection uses bundled, auditable manifests.">
+        <Panel title="Detect installed applications" description="Pick which drives to scan — all are selected by default. Drives are scanned one at a time so a single large drive can't stall the whole scan. Scans are additive: each pass adds to what's already detected, and entries whose executable no longer exists are dropped. Detection uses bundled, auditable manifests.">
           <div className="flex flex-wrap items-start gap-2">
-            <PathInput ariaLabel="Scan roots" directory multi disabled={scanning} placeholder="Blank = all drives, or e.g. D:/Tools; E:/Apps" value={scanRoots} onChange={setScanRoots} />
-            <Button disabled={scanning} aria-busy={scanning} onClick={() => void runScan()}>{scanning ? <><RefreshCw size={15} className="animate-spin" /> Scanning…</> : "Scan now"}</Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={scanning || drives.length === 0} className="gap-2">
+                  <HardDrive size={15} />
+                  {(() => {
+                    const count = drives.filter((drive) => selectedDrives.has(drive)).length;
+                    if (drives.length === 0) return "No drives found";
+                    if (count === 0) return "No drives selected";
+                    if (count === drives.length) return `All drives (${count})`;
+                    return drives.filter((drive) => selectedDrives.has(drive)).join(", ");
+                  })()}
+                  <ChevronDown size={15} className="opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuLabel>Drives to scan</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {drives.map((drive) => (
+                  <DropdownMenuCheckboxItem key={drive} checked={selectedDrives.has(drive)} onCheckedChange={() => toggleDrive(drive)} onSelect={(event) => event.preventDefault()}>
+                    {drive}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setSelectedDrives(new Set(drives))}>Select all</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setSelectedDrives(new Set())}>Clear selection</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button disabled={scanning} aria-busy={scanning} onClick={() => void scanDrives()}>{scanning ? <><RefreshCw size={15} className="animate-spin" /> Scanning…</> : "Scan now"}</Button>
           </div>
           {scanning ? <div className="space-y-2">
             <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-              <span className="flex min-w-0 items-center gap-2"><RefreshCw size={14} className="shrink-0 animate-spin" /><span className="truncate">{scanProgress?.current ? `Scanning ${scanProgress.current}…` : "Scanning across your drives…"}</span></span>
-              <span className="flex shrink-0 items-center gap-3">{scanProgress && scanProgress.total ? `${scanProgress.completed}/${scanProgress.total}` : ""}<Button variant="outline" size="sm" onClick={() => void desktopApi.cancelScan()}>Cancel</Button></span>
+              <span className="flex min-w-0 items-center gap-2"><RefreshCw size={14} className="shrink-0 animate-spin" /><span className="truncate">{scanDriveLabel ? `Scanning ${scanDriveLabel}${scanProgress?.current ? ` — ${scanProgress.current}` : "…"}` : "Scanning your drives…"}</span></span>
+              <span className="flex shrink-0 items-center gap-3">{scanProgress && scanProgress.total ? `${scanProgress.completed}/${scanProgress.total}` : ""}<Button variant="outline" size="sm" onClick={cancelDriveScan}>Cancel</Button></span>
             </div>
             <Progress value={scanProgress && scanProgress.total ? (scanProgress.completed / scanProgress.total) * 100 : 8} />
           </div> : null}
@@ -978,7 +1053,7 @@ function AppShell() {
               {installedApps.map((a) => <CommandItem key={a.id} value={`app ${a.name}`} onSelect={() => { openScreen("Applications"); setPaletteOpen(false); }}><AppWindow size={15} /> {a.name}</CommandItem>)}
             </CommandGroup> : null}
             <CommandGroup heading="Actions">
-              <CommandItem value="scan applications" onSelect={() => { setPaletteOpen(false); openScreen("Applications"); void runScan(); }}><RefreshCw size={15} /> Scan applications</CommandItem>
+              <CommandItem value="scan applications" onSelect={() => { setPaletteOpen(false); openScreen("Applications"); void scanDrives(); }}><RefreshCw size={15} /> Scan applications</CommandItem>
               <CommandItem value="check for updates" onSelect={() => { setPaletteOpen(false); void run("Checking for updates", async () => { const info = await desktopApi.checkForUpdate(); setUpdate(info); toast.message(info.available ? `Update ${info.version} is available.` : "You are on the latest version."); }); }}><Download size={15} /> Check for updates</CommandItem>
             </CommandGroup>
           </CommandList>

@@ -138,6 +138,7 @@ export const desktopApi = {
   listApps: () => invokeDesktop<ManagedApp[]>("list_apps"),
   scanApps: (roots: string[]) => invokeDesktop<unknown[]>("scan_apps", { roots }),
   cancelScan: () => invokeDesktop<void>("cancel_scan"),
+  listDrives: () => invokeDesktop<string[]>("list_drives"),
   setManualOverride: (appId: string, version: string, executable: string) => invokeDesktop<void>("set_manual_override", { appId, version, executable }),
   launchApp: (appId: string, executable: string) => invokeDesktop<void>("launch_app", { appId, executable }),
   appIcon: (executable: string) => invokeDesktop<string | null>("app_icon", { executable }),
