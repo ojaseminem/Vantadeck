@@ -60,6 +60,8 @@ export function ProjectDetail({ project, onBack, onRenamed, onOpenInEngine }: { 
   const branches = useQuery({ queryKey: ["git-branches", project.path], queryFn: () => desktopApi.gitBranches(project.path), enabled: native, retry: false });
   const [sourceView, setSourceView] = useState<"changes" | "history">("changes");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [marked, setMarked] = useState<Set<string>>(new Set());
+  const anchorRef = useRef<number | null>(null);
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const commits = useQuery({ queryKey: ["git-log", project.path], queryFn: () => desktopApi.gitLog(project.path, 30), enabled: native && sourceView === "history", retry: false });
   const diff = useQuery({ queryKey: ["git-diff", project.path, diffPath], queryFn: () => desktopApi.gitDiff(project.path, diffPath as string), enabled: native && !!diffPath, retry: false });
@@ -183,8 +185,41 @@ export function ProjectDetail({ project, onBack, onRenamed, onOpenInEngine }: { 
   useEffect(() => {
     const paths = git.data?.changedFiles.map((file) => file.path) ?? [];
     setSelected(new Set(paths));
+    setMarked(new Set());
+    anchorRef.current = null;
     setDiffPath((current) => (current && paths.includes(current) ? current : null));
   }, [git.data]);
+
+  // Ctrl/⌘-click toggles a file, Shift-click selects a range, plain click selects
+  // one and shows its diff — drives bulk actions like "Discard selected".
+  function selectFile(index: number, path: string, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) {
+    const changed = git.data?.changedFiles ?? [];
+    if (event.shiftKey && anchorRef.current != null) {
+      const [from, to] = [anchorRef.current, index].sort((a, b) => a - b);
+      setMarked(new Set(changed.slice(from, to + 1).map((file) => file.path)));
+      setDiffPath(path);
+    } else if (event.ctrlKey || event.metaKey) {
+      setMarked((current) => { const next = new Set(current); if (next.has(path)) next.delete(path); else next.add(path); return next; });
+      anchorRef.current = index;
+    } else {
+      setMarked(new Set([path]));
+      setDiffPath(path);
+      anchorRef.current = index;
+    }
+  }
+  function discardMarked() {
+    const paths = [...marked];
+    if (!paths.length) return;
+    const untracked = (git.data?.changedFiles ?? []).filter((file) => marked.has(file.path) && file.status === "untracked").length;
+    const note = untracked ? ` ${untracked} untracked file(s) will be deleted from disk.` : "";
+    if (!window.confirm(`Discard local changes to ${paths.length} file(s)?${note} This can't be undone.`)) return;
+    void run("Discarding changes", async () => {
+      for (const path of paths) await desktopApi.gitDiscard(project.path, path, true);
+      setMarked(new Set());
+      setDiffPath(null);
+      await refreshGit();
+    });
+  }
 
   function toggleSelected(path: string) {
     setSelected((current) => {
@@ -362,13 +397,17 @@ export function ProjectDetail({ project, onBack, onRenamed, onOpenInEngine }: { 
                 </div>
                 {sourceView === "changes" ? (
                   <>
+                    {marked.size > 0 ? <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/40 px-3 py-1.5 text-sm">
+                      <span className="text-muted-foreground">{marked.size} selected</span>
+                      <span className="flex items-center gap-1"><Button variant="ghost" size="sm" className="h-7" onClick={() => setMarked(new Set())}>Clear</Button><Button variant="ghost" size="sm" className="h-7 text-destructive hover:text-destructive" disabled={!native} onClick={discardMarked}><Trash2 size={14} /> Discard selected</Button></span>
+                    </div> : null}
                     <div className="max-h-[300px] overflow-y-auto">
-                      {git.data && git.data.changedFiles.length ? git.data.changedFiles.map((file) => {
+                      {git.data && git.data.changedFiles.length ? git.data.changedFiles.map((file, index) => {
                         const info = statusLabel(file.status);
                         return (
-                          <div key={file.path} className={`flex items-center gap-2 border-t border-border px-3 py-1.5 text-sm ${diffPath === file.path ? "bg-muted/50" : ""}`}>
+                          <div key={file.path} className={`flex items-center gap-2 border-t border-border px-3 py-1.5 text-sm ${marked.has(file.path) ? "bg-primary/10" : diffPath === file.path ? "bg-muted/50" : ""}`}>
                             <input type="checkbox" aria-label={`Include ${file.path}`} checked={selected.has(file.path)} onChange={() => toggleSelected(file.path)} className="size-4 accent-[var(--primary)]" />
-                            <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setDiffPath(file.path)}><FileCode2 size={14} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate" title={file.path}>{file.path}</span></button>
+                            <button className="flex min-w-0 flex-1 items-center gap-2 text-left" title="Click to view diff · Ctrl/⌘ or Shift-click to select multiple" onClick={(event) => selectFile(index, file.path, event)}><FileCode2 size={14} className="shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 truncate">{file.path}</span></button>
                             <Badge variant="outline" className="shrink-0 text-[10px]" title={info.title}>{info.label}</Badge>
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" aria-label={`Actions for ${file.path}`}><MoreHorizontal size={15} /></Button></DropdownMenuTrigger>
