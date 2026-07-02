@@ -1350,6 +1350,23 @@ async fn project_config(
         .map_err(|e| e.to_string())
 }
 
+/// Repairs a project's `.vantadeck/project.toml` when it's missing or
+/// unreadable — the fix action behind the `PROJECT_CONFIG_INVALID` health
+/// issue.
+#[tauri::command(rename_all = "camelCase")]
+async fn repair_project_config(
+    root: String,
+    confirmed: bool,
+    state: State<'_, DesktopState>,
+) -> Result<ProjectConfig, String> {
+    require_confirmation(confirmed)?;
+    state
+        .service
+        .repair_project_config(Path::new(&root), confirmed)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RecentFile {
@@ -1774,6 +1791,63 @@ async fn install_git() -> Result<String, String> {
     }
 }
 
+/// Installs Git LFS via winget (Windows) — the fix action behind the
+/// `GIT_LFS_NOT_INSTALLED` health issue. Returns a message; the app must be
+/// restarted afterwards so the new install is picked up reliably.
+#[tauri::command]
+async fn install_git_lfs() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let output = tauri::async_runtime::spawn_blocking(|| {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("winget")
+                .args([
+                    "install",
+                    "--id",
+                    "GitHub.GitLFS",
+                    "-e",
+                    "--accept-source-agreements",
+                    "--accept-package-agreements",
+                ])
+                .creation_flags(0x0800_0000)
+                .output()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| {
+            format!("Could not run winget: {e}. Install Git LFS from https://git-lfs.com")
+        })?;
+        if output.status.success() {
+            Ok("Git LFS installed. Restart Pipeline OS, then use the fix again to track large files.".into())
+        } else {
+            Err(format!(
+                "winget could not install Git LFS: {}. You can install it from https://git-lfs.com",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Automatic install is Windows-only. Install Git LFS with your package manager.".into())
+    }
+}
+
+/// Sets up Git LFS for a project and tracks its currently-untracked large
+/// files — the fix action behind the LFS "not tracked" health issues.
+#[tauri::command(rename_all = "camelCase")]
+async fn git_lfs_track_large_files(
+    root: String,
+    confirmed: bool,
+    state: State<'_, DesktopState>,
+) -> Result<VcsOperationResult, String> {
+    require_confirmation(confirmed)?;
+    state
+        .service
+        .vcs_lfs_track_large_files(Path::new(&root), confirmed)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Opens an http(s) URL in the user's default browser. The WebView's
 /// `window.open` is unreliable, so external links route through the OS opener.
 #[tauri::command(rename_all = "camelCase")]
@@ -1856,6 +1930,8 @@ pub fn run() {
             git_available,
             git_init_repo,
             install_git,
+            install_git_lfs,
+            git_lfs_track_large_files,
             list_apps,
             scan_apps,
             list_drives,
@@ -1873,6 +1949,7 @@ pub fn run() {
             install_update,
             path_info,
             project_config,
+            repair_project_config,
             recent_files,
             read_image,
             read_tools_from_dir,

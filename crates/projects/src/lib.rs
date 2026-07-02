@@ -266,6 +266,28 @@ pub fn import_project(root: &Path, name: Option<&str>) -> Result<ProjectConfig, 
     Ok(config)
 }
 
+/// Repairs a project whose `.vantadeck/project.toml` is missing or can't be
+/// read (e.g. the `PROJECT_CONFIG_INVALID` health check). Never deletes an
+/// existing file: if one is present, it's renamed aside (`project.toml.broken`,
+/// or `.broken.N` if that's already taken) so nothing is lost, then a fresh
+/// config is regenerated the same way `import_project` builds one for a new
+/// project and saved in its place.
+pub fn repair_project(root: &Path, name: Option<&str>) -> Result<ProjectConfig, ProjectError> {
+    let project_file = root.join(PROJECT_FILE);
+    if project_file.is_file() {
+        let mut backup = project_file.with_extension("toml.broken");
+        let mut suffix = 1u32;
+        while backup.exists() {
+            backup = project_file.with_extension(format!("toml.broken.{suffix}"));
+            suffix += 1;
+        }
+        fs::rename(&project_file, &backup)?;
+    }
+    let config = infer_project(root, name)?;
+    save_project(root, &config)?;
+    Ok(config)
+}
+
 fn read_unity_version(path: &Path) -> Option<String> {
     fs::read_to_string(path).ok().and_then(|content| {
         content.lines().find_map(|line| {

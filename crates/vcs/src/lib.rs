@@ -499,6 +499,52 @@ impl GitProvider {
         }
     }
 
+    /// Fix action behind the `GIT_LFS_NOT_INITIALIZED`/`LARGE_FILE_NOT_TRACKED`
+    /// health issues: enables LFS for this repo, tracks a pattern for every
+    /// large file currently found untracked (by extension where it has one,
+    /// by exact path otherwise), and stages the resulting `.gitattributes`.
+    /// Re-probes live state rather than trusting a caller-supplied file list,
+    /// so it stays correct even if the working tree changed since the health
+    /// check ran.
+    pub async fn lfs_track_large_files(
+        &self,
+        root: &Path,
+        large_file_threshold: u64,
+    ) -> Result<VcsOperationResult, VcsError> {
+        self.run(root, &["lfs", "install", "--local"]).await?;
+        let probe = self.lfs_probe(root, large_file_threshold).await;
+        if probe.large_untracked_files.is_empty() {
+            return Ok(VcsOperationResult {
+                stdout: "Git LFS is set up; no large files need tracking right now.".into(),
+                stderr: String::new(),
+            });
+        }
+        let mut patterns: Vec<String> = probe
+            .large_untracked_files
+            .iter()
+            .map(
+                |path| match Path::new(path).extension().and_then(|ext| ext.to_str()) {
+                    Some(extension) => format!("*.{extension}"),
+                    None => path.clone(),
+                },
+            )
+            .collect();
+        patterns.sort();
+        patterns.dedup();
+        let mut track_args: Vec<&str> = vec!["lfs", "track"];
+        track_args.extend(patterns.iter().map(String::as_str));
+        self.run(root, &track_args).await?;
+        self.run(root, &["add", ".gitattributes"]).await?;
+        Ok(VcsOperationResult {
+            stdout: format!(
+                "Now tracking {} pattern(s) with Git LFS: {}. Review and commit .gitattributes.",
+                patterns.len(),
+                patterns.join(", ")
+            ),
+            stderr: String::new(),
+        })
+    }
+
     /// Total size in bytes of the `.git` directory — a proxy for repository
     /// history bloat (large blobs committed directly instead of via LFS,
     /// unpruned history, etc.). Runs on a blocking thread since it walks the

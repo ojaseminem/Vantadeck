@@ -100,7 +100,7 @@ export function HealthScreen({ projects, onOpenProject }: { projects: Registered
                     <Button variant="ghost" size="sm" onClick={() => onOpenProject({ path: project.path, name: project.name })}>Open</Button>
                   </div>
                 </div>
-                {isExpanded && issues ? <div className="mt-3 border-t border-border pt-3"><HealthPanel projectPath={project.path} issues={issues} /></div> : null}
+                {isExpanded && issues ? <div className="mt-3 border-t border-border pt-3"><HealthPanel projectPath={project.path} issues={issues} onFixed={() => void runOne(project.path, false)} /></div> : null}
               </CardContent>
             </Card>
           );

@@ -467,7 +467,7 @@ export function ProjectDetail({ project, onBack, onRenamed, onOpenInEngine }: { 
               <div><h2 className="text-base font-semibold">Health</h2>{healthCheckedAt ? <p className="text-xs text-muted-foreground">Last checked {formatLastOpened(healthCheckedAt)}</p> : null}</div>
               <Button variant="outline" size="sm" disabled={!native} onClick={runHealth}><RefreshCw size={14} /> {healthCheckedAt ? "Re-check" : "Run checks"}</Button>
             </div>
-            {health.length ? <HealthPanel projectPath={project.path} issues={health} />
+            {health.length ? <HealthPanel projectPath={project.path} issues={health} onFixed={runHealth} />
               : healthCheckedAt ? <p className="text-sm text-muted-foreground">No health issues found. Engine versions, launch profiles, and source control all look good.</p>
               : <p className="text-sm text-muted-foreground">Run checks to validate engine versions, launch profiles, and source control. You can dismiss issues you don't care about and unhide them here later.</p>}
           </CardContent></Card>

@@ -1,6 +1,6 @@
 use std::fs;
 
-use vantadeck_projects::{ProjectError, import_project, infer_project};
+use vantadeck_projects::{ProjectError, import_project, infer_project, repair_project};
 
 #[test]
 fn infers_unity_version_from_project_settings() {
@@ -60,6 +60,37 @@ fn infers_unreal_project_and_blender_source_folder() {
         .find(|app| app.app_id == "blender")
         .expect("blender link");
     assert_eq!(blender.folder.as_deref(), Some("Art/Source"));
+}
+
+#[test]
+fn repairs_missing_project_file_without_losing_prior_config() {
+    let root = tempfile::tempdir().expect("project root");
+    import_project(root.path(), Some("Northbreak")).expect("initial import");
+    // Simulate the PROJECT_CONFIG_INVALID case: the metadata dir survives but
+    // project.toml itself is gone (e.g. a bad sync or manual delete).
+    fs::remove_file(root.path().join(".vantadeck/project.toml")).expect("remove project file");
+
+    let repaired = repair_project(root.path(), None).expect("repair succeeds");
+
+    assert!(root.path().join(".vantadeck/project.toml").is_file());
+    assert_eq!(repaired.project_type, "general-creative");
+}
+
+#[test]
+fn repairs_corrupt_project_file_by_renaming_it_aside() {
+    let root = tempfile::tempdir().expect("project root");
+    import_project(root.path(), Some("Northbreak")).expect("initial import");
+    fs::write(
+        root.path().join(".vantadeck/project.toml"),
+        "not valid toml {{{",
+    )
+    .expect("corrupt file");
+
+    repair_project(root.path(), None).expect("repair succeeds");
+
+    // The corrupt file is preserved, not deleted, and the repaired one loads cleanly.
+    assert!(root.path().join(".vantadeck/project.toml.broken").is_file());
+    vantadeck_projects::load_project(root.path()).expect("repaired project loads");
 }
 
 #[test]

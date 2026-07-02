@@ -394,6 +394,19 @@ impl ApplicationService {
         Ok(load_project(root)?)
     }
 
+    /// Repairs a project whose `.vantadeck/project.toml` is missing or
+    /// unreadable (the `PROJECT_CONFIG_INVALID` health check) by regenerating
+    /// it via the same inference used on import. A broken existing file is
+    /// renamed aside, never deleted.
+    pub async fn repair_project_config(
+        &self,
+        root: &Path,
+        confirmed: bool,
+    ) -> Result<ProjectConfig, ApplicationError> {
+        require_confirmation("Repairing project metadata", confirmed)?;
+        Ok(vantadeck_projects::repair_project(root, None)?)
+    }
+
     /// Records that a project was just opened (for "last opened" display/order).
     pub async fn touch_project_opened(&self, root: &Path) -> Result<(), ApplicationError> {
         self.storage.touch_project_opened(root).await?;
@@ -852,6 +865,20 @@ impl ApplicationService {
 
     pub async fn vcs_stash_list(&self, root: &Path) -> Result<Vec<String>, ApplicationError> {
         Ok(self.git.stash_list(root).await?)
+    }
+
+    /// Fix action for the LFS "not tracked" health issues: sets up LFS for
+    /// this repo and tracks its currently-untracked large files.
+    pub async fn vcs_lfs_track_large_files(
+        &self,
+        root: &Path,
+        confirmed: bool,
+    ) -> Result<VcsOperationResult, ApplicationError> {
+        require_confirmation("Setting up Git LFS", confirmed)?;
+        Ok(self
+            .git
+            .lfs_track_large_files(root, 50 * 1024 * 1024)
+            .await?)
     }
 
     pub async fn vcs_commit_paths(
